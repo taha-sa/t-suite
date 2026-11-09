@@ -94,3 +94,9 @@ Komutlar uygulamanin kendi thread'ine yonlendirilmelidir: sunucu handler'i threa
   `tsuite-update-v1\n<appId>\n<version>\n<sha256-hex-kucuk>`. Genel anahtar (base64 SPKI) her uygulamaya gomulur. Uyusmazlikta indirme silinir ve reddedilir. Surum + appId imzaya bagli: downgrade ve capraz-uygulama yeniden kullanimi engellenir.
 * Uygulama dosyayi dogruladiktan sonra `TSuite.Updater.exe`'yi gecici klasore kopyalayip calistirir ve **hemen cikar**. Yardimci: ebeveyn PID'in cikisini bekler -> eski exe `.bak` -> yeni dosya yerine -> hata olursa geri al -> (istenirse) yeniden baslat. Log: `%LOCALAPPDATA%\T-Suite\logs\updater.log`. `.zip` kaynaklari hedef klasore acilir (yol-gecisi korumali).
 * Anahtarlar: `C:\Users\hp\.t-suite\keys\<app>.pem` (ozel, repo disi) ve `<app>.pub`. Uretim/imza: `tools/keygen`.
+
+## 9. Standart guncelleme komutlari / Standard update commands
+
+
+
+Istege bagli: `app.update.check` -> `{available, version}`; `app.update.install` -> `{started}` (`UpdateLink.Register`). Uygulamalar ayrica `--update` CLI bayragini destekler (kontrol, varsa indir + yardimci, cik; arayuz yok). T-Bridge "Hepsini guncelle": calisanlara `app.update.install`, kapalilara `exe --update`. T-Bridge yalnizca `download.*`, `ram.*`, `disk.*`, `scan.*`, `app.update.*` onekli olaylari telefona iletir; ilerleme olaylari (`*.progress`) ogeye gore <= 2 Hz.
