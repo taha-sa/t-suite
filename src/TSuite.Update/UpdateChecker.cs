@@ -10,7 +10,9 @@ public sealed class UpdateOptions
     public required string AppId { get; init; }
     public required string CurrentVersion { get; init; }
     /// <summary>Base64 SPKI P-256 genel anahtar (uygulamaya gomulu).</summary>
-    public required string PublicKeyBase64 { get; init; }
+    public string PublicKeyBase64 { get; init; } = "";
+    /// <summary>Ek gomulu guvenilir anahtarlar (rotasyon icin). PublicKeyBase64 ile birlesir.</summary>
+    public IReadOnlyList<string>? TrustedPublicKeysBase64 { get; init; }
     /// <summary>Varsayilan: https://github.com/taha-sa/{AppId}-releases/releases/latest/download/latest.json</summary>
     public string? ManifestUrl { get; init; }
     public string? StatePath { get; init; }
@@ -77,6 +79,40 @@ public sealed class UpdateChecker
         }
     }
 
+    /// <summary>Etkin guvenilir anahtarlar: (gomulu + kalici) eksi iptal edilenler.</summary>
+    public IReadOnlyList<string> GetTrustedKeys() => Effective(LoadState().Apps.GetValueOrDefault(_o.AppId));
+
+    List<string> Effective(AppUpdateState? a)
+    {
+        var all = new List<string>();
+        if (!string.IsNullOrEmpty(_o.PublicKeyBase64)) all.Add(_o.PublicKeyBase64);
+        if (_o.TrustedPublicKeysBase64 != null) all.AddRange(_o.TrustedPublicKeysBase64.Where(k => !string.IsNullOrEmpty(k)));
+        if (a?.TrustedKeys != null) all.AddRange(a.TrustedKeys);
+        var revoked = a?.RevokedKeyIds ?? [];
+        return all.Distinct().Where(k => !revoked.Contains(UpdateSigning.KeyId(k), StringComparer.OrdinalIgnoreCase)).ToList();
+    }
+
+    /// <summary>Gecerli rotasyon kaydini kalici uygular. Yetkisiz kayit sessizce yoksayilir.</summary>
+    void ApplyRotation(KeyRotation r)
+    {
+        SaveState(a =>
+        {
+            var trusted = Effective(a);
+            if (!UpdateSigning.VerifyRotation(trusted, _o.AppId, r)) return;
+            var revoked = a.RevokedKeyIds ??= [];
+            if (!revoked.Contains(r.NewKeyId.ToLowerInvariant()) && !trusted.Contains(r.NewKey))
+                (a.TrustedKeys ??= []).Add(r.NewKey);
+            foreach (var id in r.RevokeKeyIds ?? [])
+            {
+                var lid = id.ToLowerInvariant();
+                if (revoked.Contains(lid)) continue;
+                revoked.Add(lid);
+                if (Effective(a).Count == 0) revoked.Remove(lid); // son anahtar dusurulemez
+            }
+            if (revoked.Count == 0) a.RevokedKeyIds = null;
+        });
+    }
+
     public DateTime LastCheckUtc => LoadState().Apps.TryGetValue(_o.AppId, out var a) ? a.LastCheckUtc : default;
 
     public void SkipVersion(string version) => SaveState(a => { a.SkippedVersion = version; a.Pending = null; });
@@ -134,6 +170,7 @@ public sealed class UpdateChecker
         var m = JsonSerializer.Deserialize(bytes, UpdateJsonContext.Default.LatestManifest)
                 ?? throw new InvalidDataException("empty latest.json");
         SaveState(a => a.LastCheckUtc = DateTime.UtcNow);
+        if (m.KeyRotation != null) ApplyRotation(m.KeyRotation);
 
         if (string.IsNullOrEmpty(m.Version) || string.IsNullOrEmpty(m.Url)) throw new InvalidDataException("incomplete latest.json");
         if (!IsValidVersion(m.Version)) throw new InvalidDataException("invalid version in latest.json");
@@ -177,7 +214,7 @@ public sealed class UpdateChecker
                 }
             }
             progress?.Report(1.0);
-            UpdateSigning.VerifyFile(path, info.Manifest, _o.AppId, _o.PublicKeyBase64);
+            UpdateSigning.VerifyFile(path, info.Manifest, _o.AppId, GetTrustedKeys());
             return path;
         }
         catch

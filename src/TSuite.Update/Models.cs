@@ -12,6 +12,19 @@ public sealed class LatestManifest
     [JsonPropertyName("url")] public string Url { get; set; } = "";
     [JsonPropertyName("sha256")] public string Sha256 { get; set; } = "";
     [JsonPropertyName("signature")] public string Signature { get; set; } = "";
+    /// <summary>Istege bagli: imzayi atan anahtarin kimligi (SPKI SHA-256 ilk 8 bayt, hex). Varsa yalniz o anahtar denenir.</summary>
+    [JsonPropertyName("key_id")] public string? KeyId { get; set; }
+    /// <summary>Istege bagli anahtar rotasyon kaydi (eski, guvenilir anahtarla imzali).</summary>
+    [JsonPropertyName("key_rotation")] public KeyRotation? KeyRotation { get; set; }
+}
+
+/// <summary>Anahtar rotasyon kaydi; PROTOCOL.md "Anahtar rotasyonu".</summary>
+public sealed class KeyRotation
+{
+    [JsonPropertyName("new_key")] public string NewKey { get; set; } = "";
+    [JsonPropertyName("new_key_id")] public string NewKeyId { get; set; } = "";
+    [JsonPropertyName("revoke_key_ids")] public List<string>? RevokeKeyIds { get; set; }
+    [JsonPropertyName("signature")] public string Signature { get; set; } = "";
 }
 
 public sealed class AppUpdateState
@@ -20,6 +33,10 @@ public sealed class AppUpdateState
     [JsonPropertyName("skippedVersion")] public string? SkippedVersion { get; set; }
     /// <summary>"Sonra" denen bekleyen surum (ag olmadan gostermek icin; kurulum yine imzali manifeste dayanir).</summary>
     [JsonPropertyName("pending")] public PendingUpdate? Pending { get; set; }
+    /// <summary>Rotasyonla ogrenilen kalici guvenilir anahtarlar (base64 SPKI).</summary>
+    [JsonPropertyName("trustedKeys")] public List<string>? TrustedKeys { get; set; }
+    /// <summary>Iptal edilen anahtar kimlikleri (gomulu anahtarlari da dusurur).</summary>
+    [JsonPropertyName("revokedKeyIds")] public List<string>? RevokedKeyIds { get; set; }
 }
 
 public sealed class PendingUpdate

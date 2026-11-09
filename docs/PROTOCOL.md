@@ -108,6 +108,17 @@ Komutlar uygulamanin kendi thread'ine yonlendirilmelidir: sunucu handler'i threa
 * Uygulama dosyayi dogruladiktan sonra `TSuite.Updater.exe`'yi gecici klasore kopyalayip calistirir ve **hemen cikar**. Yardimci: ebeveyn PID'in cikisini bekler -> eski exe `.bak` -> yeni dosya yerine -> hata olursa geri al -> (istenirse) yeniden baslat. Log: `%LOCALAPPDATA%\T-Suite\logs\updater.log`. `.zip` kaynaklari hedef klasore acilir (yol-gecisi korumali).
 * Anahtarlar: `C:\Users\hp\.t-suite\keys\<app>.pem` (ozel, repo disi) ve `<app>.pub`. Uretim/imza: `tools/keygen`.
 
+### 8.1 Anahtar rotasyonu / Key rotation
+* **latest.json ek alanlari (hepsi istege bagli; 1.1.0 istemcileri bilinmeyen alanlari yoksayar):** `key_id` = imzayi atan anahtarin kimligi (SPKI baytlarinin SHA-256 ilk 8 baytinin kucuk harf hex'i; `tsuite-keygen pub <app>` yazdirir). Varsa istemci YALNIZ o anahtari dener; yoksa tum guvenilir anahtarlari dener. `key_rotation` = `{"new_key":"<base64 SPKI>","new_key_id":"<hex>","revoke_key_ids":["<hex>"],"signature":"<base64>"}`.
+* **Rotasyon imzasi:** ECDSA P-256/SHA-256, IEEE-P1363, ESKI (halen guvenilir) bir anahtarla, UTF-8 mesaj: `tsuite-keyrot-v1
+<appId>
+<new_key_id>
+<new_key_base64>
+<revoke idleri virgulle>`. `new_key_id` `new_key`ten hesaplananla esit olmali. Surum imza mesaji (`tsuite-update-v1...`) DEGISMEZ.
+* **Istemci:** `UpdateOptions.TrustedPublicKeysBase64` (gomulu liste) + eski `PublicKeyBase64` (tek anahtara esdeger). Imza guvenilir anahtarlardan HERHANGI biriyle tutarsa kabul. Gecerli bir rotasyon kaydi gorulunce yeni anahtar `update-state.json` -> `apps.<id>.trustedKeys` icine, iptaller `apps.<id>.revokedKeyIds` icine kalici yazilir (etkin kume = gomulu + kalici - iptal). Yetkisiz/bozuk kayit sessizce yoksayilir. Son kalan anahtar iptal edilemez. Iptal edilmis anahtar tekrar eklenmez. Rotasyon kaydi her `CheckAsync` yanitinda islenir (guncel olsa bile).
+* **Sira (kurulu 1.1.0 istemcilerle):** 1.1.0 istemcileri YALNIZ gomulu eski anahtari bilir ve rotasyon kaydini ogrenemez; bu yuzden (1) yeni anahtari uygulamalara gomup (`TrustedPublicKeysBase64`) yeni surumu ESKI anahtarla imzalayip yayinla (`tsuite-keygen rotate <app>` ile uretilen kaydi manifeste `key_rotation` olarak ekle) -> kurulu istemciler bu surumle yeni anahtari hem gomulu hem kalici olarak edinir; (2) istemcilerin cogu yeni surume gecince manifesti YENI anahtarla imzala (`key_id` ekle); 1.1.0'da kalanlar yeni imzayi dogrulayamaz, bu yuzden eski anahtarla imzali bir kopruden surum bir sure daha yayinlanmali; (3) bir surum sonra `revoke_key_ids` ile eski anahtari dusur. 1.1.0 istemcileri icin dogrudan (tek adimda) rotasyon MUMKUN DEGILDIR: gecis yolu yukaridaki kopru surumudur.
+* **Iptal / sizinti:** eski ozel anahtar sizarsa saldirgan o anahtarla sahte surum ve (iptal edilmemisse) sahte rotasyon imzalayabilir. Hemen yeni anahtarla bir `key_rotation` (iptal listesinde sizan anahtar) yayinlayin; yeni anahtar bu kayit bir kez islenince gecerli olur, ancak henuz kaydi gormemis istemciler (ve 1.1.0) sizan anahtarla kandirilabilir: bu istemciler icin tek cozum yeni anahtar gomulu bir surumun elle kurulmasidir. `tsuite-keygen rotate <app> [iptalId,...]` kaydi eski ozel anahtarla imzalar, yeni cifti `<app>.next.pem/.pub` olarak yazar (ozel anahtar ASLA yazdirilmaz); sonra `<app>.next.*` dosyalari `<app>.*` olarak elle terfi ettirilir.
+
 ## 9. Standart guncelleme komutlari / Standard update commands
 
 
