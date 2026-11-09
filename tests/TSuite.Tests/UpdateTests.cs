@@ -105,3 +105,40 @@ public class UpdateTests
             chk.DownloadAsync(new UpdateInfo("1", "2.0.0", "", null, m)));
     }
 }
+
+public class UpdateLinkTests
+{
+    [Fact]
+    public async Task Check_and_install_commands_over_pipe()
+    {
+        var id = "ul" + Guid.NewGuid().ToString("N")[..10];
+        var (_, pub, _, _, _) = (0, "", "", "", "");
+        _ = pub;
+        var (pem, pubKey) = UpdateSigning.GenerateKeyPair();
+        var payload = System.Text.Encoding.UTF8.GetBytes("exe");
+        var sha = Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(payload));
+        using var ec = System.Security.Cryptography.ECDsa.Create(); ec.ImportFromPem(pem);
+        var latest = new LatestManifest { Version = "9.0.0", Notes = "n", Url = "https://dl/app.exe", Sha256 = sha, Signature = UpdateSigning.Sign(ec, id, "9.0.0", sha) };
+        var http = new HttpClient(new FakeHandler(r => r.RequestUri!.AbsolutePath.EndsWith("latest.json")
+            ? new HttpResponseMessage(System.Net.HttpStatusCode.OK) { Content = new StringContent(System.Text.Json.JsonSerializer.Serialize(latest)) }
+            : new HttpResponseMessage(System.Net.HttpStatusCode.OK) { Content = new ByteArrayContent(payload) }));
+        var state = Path.Combine(Path.GetTempPath(), "ul-" + Guid.NewGuid().ToString("N") + ".json");
+        var ctl = new UpdateController(new UpdateChecker(new UpdateOptions { AppId = id, CurrentVersion = "1.0.0", PublicKeyBase64 = pubKey, StatePath = state, ManifestUrl = "https://x/latest.json", Http = http }));
+
+        await using var srv = new TSuite.Link.LinkServer(id, "1.0.0", [], UpdateLink.Commands);
+        UpdateLink.Register(srv, ctl);
+        srv.Start();
+        await using var cli = new TSuite.Link.LinkClient(id, TimeSpan.FromMilliseconds(100));
+        cli.Start();
+        Assert.True(await cli.WaitConnectedAsync(TimeSpan.FromSeconds(5)));
+        var r = await cli.SendCommandAsync(UpdateLink.Check, timeout: TimeSpan.FromSeconds(10));
+        var res = r.Data!.Value.GetProperty("result");
+        Assert.True(res.GetProperty("available").GetBoolean());
+        Assert.Equal("9.0.0", res.GetProperty("version").GetString());
+    }
+
+    sealed class FakeHandler(Func<HttpRequestMessage, HttpResponseMessage> f) : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage r, CancellationToken ct) => Task.FromResult(f(r));
+    }
+}

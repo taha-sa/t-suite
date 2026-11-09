@@ -4,4 +4,7 @@
     <UseWindowsForms>true</UseWindowsForms>
     <RootNamespace>TSuite.Update</RootNamespace>
   </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\TSuite.Link\TSuite.Link.csproj" />
+  </ItemGroup>
 </Project>
