@@ -55,6 +55,19 @@ public sealed class AppRegistry
         return list;
     }
 
+    /// <summary>Temiz cikista cagrilir (PROTOCOL.md §1): kaydi SILMEZ, pid=0 yazar; hub kapali uygulamayi exePath ile baslatabilsin.</summary>
+    public void MarkStopped(string id)
+    {
+        try
+        {
+            var m = Read(id);
+            if (m == null) return;
+            m.Pid = 0;
+            Write(m);
+        }
+        catch { }
+    }
+
     public void Remove(string id)
     {
         try { File.Delete(PathFor(id)); } catch { }
@@ -62,7 +75,7 @@ public sealed class AppRegistry
 
     /// <summary>
     /// Bayat kayitlari temizler: exePath artik yoksa (kaldirilmis uygulama) dosya silinir;
-    /// pid yazili ama surec olu ise (cokme) kayit silinir. Uygulamalar temiz cikista kendi kaydini Remove() ile siler. Silinen id'leri dondurur.
+    /// pid yazili ama surec olu ise (cokme) kayit silinir. Uygulamalar temiz cikista kaydi silmez, MarkStopped() ile pid=0 yazar. Silinen id'leri dondurur.
     /// </summary>
     public IReadOnlyList<string> CleanupStale()
     {

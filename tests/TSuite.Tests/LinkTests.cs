@@ -285,4 +285,18 @@ public class LinkRobustnessTests
         var r = await good.SendCommandAsync("ram.clean", timeout: TimeSpan.FromSeconds(3));
         Assert.True(r.Data!.Value.GetProperty("ok").GetBoolean());
     }
+
+    [Fact]
+    public void MarkStopped_keeps_manifest_with_pid_zero()
+    {
+        var dir = Path.Combine(Path.GetTempPath(), "reg-" + Guid.NewGuid().ToString("N"));
+        var reg = new AppRegistry(dir);
+        var exe = Path.Combine(dir, "a.exe"); Directory.CreateDirectory(dir); File.WriteAllText(exe, "x");
+        reg.Write(new AppManifest { Id = "app-x", Name = "X", Version = "1.0.0", ExePath = exe, Pid = 1234 });
+        reg.MarkStopped("app-x");
+        var m = reg.Read("app-x");
+        Assert.NotNull(m); Assert.Equal(0, m!.Pid); Assert.Equal(exe, m.ExePath);
+        Assert.Empty(reg.CleanupStale());
+        Directory.Delete(dir, true);
+    }
 }
