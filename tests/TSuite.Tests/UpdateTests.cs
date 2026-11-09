@@ -104,6 +104,41 @@ public class UpdateTests
         await Assert.ThrowsAsync<UpdateVerificationException>(() =>
             chk.DownloadAsync(new UpdateInfo("1", "2.0.0", "", null, m)));
     }
+
+    [Theory]
+    [InlineData("../../x")]
+    [InlineData("9.9.9-/../../../../x")]
+    [InlineData(@"9.9.9-..\..\x")]
+    [InlineData("1.0")]
+    public async Task Malicious_version_rejected_before_any_path_use(string ver)
+    {
+        var (_, pub, _, _, m) = Make();
+        m.Version = ver;
+        var h = new Handler(r => new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(JsonSerializer.Serialize(m)) });
+        var chk = new UpdateChecker(new UpdateOptions { AppId = "app1", CurrentVersion = "1.0.0", PublicKeyBase64 = pub, ManifestUrl = "https://x/latest.json", StatePath = Path.Combine(Path.GetTempPath(), "st-" + Guid.NewGuid().ToString("N")), Http = new HttpClient(h) });
+        await Assert.ThrowsAsync<InvalidDataException>(() => chk.CheckAsync(force: true));
+        await Assert.ThrowsAsync<UpdateVerificationException>(() => chk.DownloadAsync(new UpdateInfo("1.0.0", ver, "", null, m)));
+    }
+
+    [Fact]
+    public async Task Oversize_manifest_rejected()
+    {
+        var (_, pub, _, _, _) = Make();
+        var big = new string('a', 70 * 1024);
+        var h = new Handler(r => new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent("{\"version\":\"2.0.0\",\"notes\":\"" + big + "\"}") });
+        var chk = new UpdateChecker(new UpdateOptions { AppId = "app1", CurrentVersion = "1.0.0", PublicKeyBase64 = pub, ManifestUrl = "https://x/latest.json", StatePath = Path.Combine(Path.GetTempPath(), "st-" + Guid.NewGuid().ToString("N")), Http = new HttpClient(h) });
+        await Assert.ThrowsAsync<InvalidDataException>(() => chk.CheckAsync(force: true));
+    }
+
+    [Fact]
+    public async Task Oversize_download_aborted()
+    {
+        var (_, pub, _, _, m) = Make();
+        var h = new Handler(r => new HttpResponseMessage(HttpStatusCode.OK) { Content = new ByteArrayContent(new byte[4096]) });
+        var chk = new UpdateChecker(new UpdateOptions { AppId = "app1", CurrentVersion = "1.0.0", PublicKeyBase64 = pub, MaxDownloadBytes = 1000, Http = new HttpClient(h) });
+        var ex = await Assert.ThrowsAsync<UpdateVerificationException>(() => chk.DownloadAsync(new UpdateInfo("1.0.0", "2.0.0", "", null, m)));
+        Assert.Contains("too large", ex.Message);
+    }
 }
 
 public class UpdateLinkTests

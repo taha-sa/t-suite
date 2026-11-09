@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 
 namespace TSuite.Update;
 
@@ -17,6 +18,10 @@ public sealed class UpdateOptions
     public HttpClient? Http { get; init; }
     /// <summary>Yalniz testler icin: https olmayan URL'lere izin ver.</summary>
     public bool AllowInsecureUrls { get; init; }
+    /// <summary>latest.json ust siniri (bayt). Varsayilan 64 KB.</summary>
+    public int MaxManifestBytes { get; init; } = 64 * 1024;
+    /// <summary>Indirme ust siniri (bayt). Varsayilan 500 MB.</summary>
+    public long MaxDownloadBytes { get; init; } = 500L * 1024 * 1024;
 }
 
 public sealed class UpdateChecker
@@ -25,6 +30,10 @@ public sealed class UpdateChecker
     readonly HttpClient _http;
     readonly string _statePath;
     static readonly object StateLock = new();
+    static readonly Regex SemVerRx = new(@"^\d+\.\d+\.\d+(-[0-9A-Za-z.]+)?$", RegexOptions.CultureInvariant | RegexOptions.NonBacktracking);
+
+    /// <summary>Imzasiz manifest surumu dosya yolunda/karsilastirmada kullanilmadan once katı SemVer denetimi.</summary>
+    public static bool IsValidVersion(string? v) => v is { Length: > 0 and <= 64 } && SemVerRx.IsMatch(v);
 
     public UpdateChecker(UpdateOptions o)
     {
@@ -75,12 +84,26 @@ public sealed class UpdateChecker
 
         using var resp = await _http.GetAsync(ManifestUrl, ct).ConfigureAwait(false);
         resp.EnsureSuccessStatusCode();
-        var bytes = await resp.Content.ReadAsByteArrayAsync(ct).ConfigureAwait(false);
+        if (resp.Content.Headers.ContentLength is long cl && cl > _o.MaxManifestBytes)
+            throw new InvalidDataException("latest.json too large");
+        byte[] bytes;
+        await using (var ms = await resp.Content.ReadAsStreamAsync(ct).ConfigureAwait(false))
+        {
+            using var acc = new MemoryStream();
+            var b = new byte[8192]; int r;
+            while ((r = await ms.ReadAsync(b, ct).ConfigureAwait(false)) > 0)
+            {
+                if (acc.Length + r > _o.MaxManifestBytes) throw new InvalidDataException("latest.json too large");
+                acc.Write(b, 0, r);
+            }
+            bytes = acc.ToArray();
+        }
         var m = JsonSerializer.Deserialize(bytes, UpdateJsonContext.Default.LatestManifest)
                 ?? throw new InvalidDataException("empty latest.json");
         SaveState(a => a.LastCheckUtc = DateTime.UtcNow);
 
         if (string.IsNullOrEmpty(m.Version) || string.IsNullOrEmpty(m.Url)) throw new InvalidDataException("incomplete latest.json");
+        if (!IsValidVersion(m.Version)) throw new InvalidDataException("invalid version in latest.json");
         if (!VersionUtil.IsNewer(_o.CurrentVersion, m.Version)) return null;
         if (!force && st?.SkippedVersion != null && VersionUtil.Compare(st.SkippedVersion, m.Version) == 0) return null;
         return new UpdateInfo(_o.CurrentVersion, m.Version, m.Notes, m.PubDate, m);
@@ -93,22 +116,28 @@ public sealed class UpdateChecker
         if (uri.Scheme != Uri.UriSchemeHttps && !_o.AllowInsecureUrls)
             throw new UpdateVerificationException("Download URL must be https");
 
-        var dir = Path.Combine(Path.GetTempPath(), "TSuite-update", _o.AppId + "-" + info.NewVersion);
+        // Surum imzasiz alandir: dogrulanmadan yolda KULLANILMAZ; dizin Guid ile kurulur.
+        if (!IsValidVersion(info.NewVersion) || !IsValidVersion(info.Manifest.Version))
+            throw new UpdateVerificationException("Invalid version string");
+        var dir = Path.Combine(Path.GetTempPath(), "TSuite-update", Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(dir);
         var name = Path.GetFileName(uri.LocalPath);
-        if (string.IsNullOrEmpty(name)) name = _o.AppId + ".bin";
+        foreach (var c in Path.GetInvalidFileNameChars()) name = name.Replace(c, '_');
+        if (string.IsNullOrWhiteSpace(name) || name.Trim('.').Length == 0) name = "update.bin";
         var path = Path.Combine(dir, name);
         try
         {
             using var resp = await _http.GetAsync(uri, HttpCompletionOption.ResponseHeadersRead, ct).ConfigureAwait(false);
             resp.EnsureSuccessStatusCode();
             long total = resp.Content.Headers.ContentLength ?? -1;
+            if (total > _o.MaxDownloadBytes) throw new UpdateVerificationException("Download too large");
             await using (var src = await resp.Content.ReadAsStreamAsync(ct).ConfigureAwait(false))
             await using (var dst = new FileStream(path, FileMode.Create, FileAccess.Write, FileShare.None, 81920, true))
             {
                 var buf = new byte[81920]; long done = 0; int n; var sw = Stopwatch.StartNew(); long last = 0;
                 while ((n = await src.ReadAsync(buf, ct).ConfigureAwait(false)) > 0)
                 {
+                    if (done + n > _o.MaxDownloadBytes) throw new UpdateVerificationException("Download too large");
                     await dst.WriteAsync(buf.AsMemory(0, n), ct).ConfigureAwait(false);
                     done += n;
                     if (total > 0 && sw.ElapsedMilliseconds - last >= 80) { last = sw.ElapsedMilliseconds; progress?.Report((double)done / total); }
@@ -120,7 +149,7 @@ public sealed class UpdateChecker
         }
         catch
         {
-            try { File.Delete(path); } catch { }
+            try { Directory.Delete(dir, true); } catch { }
             throw;
         }
     }
