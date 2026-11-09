@@ -18,9 +18,9 @@ for (int i = 0; i < args.Length; i++)
 {
     switch (args[i])
     {
-        case "--pid": pid = int.Parse(args[++i]); break;
-        case "--target": target = args[++i]; break;
-        case "--source": source = args[++i]; break;
+        case "--pid": if (i + 1 >= args.Length || !int.TryParse(args[++i], out pid)) return 2; break;
+        case "--target": if (i + 1 >= args.Length) return 2; target = args[++i]; break;
+        case "--source": if (i + 1 >= args.Length) return 2; source = args[++i]; break;
         case "--restart": restart = true; break;
     }
 }
