@@ -82,6 +82,9 @@ public sealed class UpdateChecker
         var st = LoadState().Apps.GetValueOrDefault(_o.AppId);
         if (!force && st != null && DateTime.UtcNow - st.LastCheckUtc < _o.MinInterval) return null;
 
+        if (!Uri.TryCreate(ManifestUrl, UriKind.Absolute, out var mu) || (mu.Scheme != Uri.UriSchemeHttps && !_o.AllowInsecureUrls))
+            throw new UpdateVerificationException("Manifest URL must be https");
+
         using var resp = await _http.GetAsync(ManifestUrl, ct).ConfigureAwait(false);
         resp.EnsureSuccessStatusCode();
         if (resp.Content.Headers.ContentLength is long cl && cl > _o.MaxManifestBytes)
