@@ -124,3 +124,9 @@ Komutlar uygulamanin kendi thread'ine yonlendirilmelidir: sunucu handler'i threa
 
 
 Istege bagli: `app.update.check` -> `{available, version}`; `app.update.install` -> `{started}` (`UpdateLink.Register`). Uygulamalar ayrica `--update` CLI bayragini destekler (kontrol, varsa indir + yardimci, cik; arayuz yok). `--update` calisirken AppRegistry'de canli (pid>0) bir tepsi ornegi varsa (`UpdateCli.FindRunningInstancePids`) onun pid'i de `--pid` olarak verilir (CloseMainWindow denenir), guncelleme sonrasi `--restart` uygulanir; ornek yoksa davranis aynidir. Not: ornek 60 sn icinde cikmazsa guncelleme iptal olur (hedef degismez). T-Bridge "Hepsini guncelle": calisanlara `app.update.install`, kapalilara `exe --update`. T-Bridge yalnizca `download.*`, `ram.*`, `disk.*`, `scan.*`, `app.update.*` onekli olaylari telefona iletir; ilerleme olaylari (`*.progress`) ogeye gore <= 2 Hz.
+
+## 10. Uyumluluk / Compatibility
+
+* **(a) Hello protocol:** `hello.protocol` veya `appId` beklenenle uyusmazsa istemci zarfi reddeder; `Connected` tetiklenmez ve baglanti yeniden denenir (bkz. bolum 3).
+* **(b) Viewer-Bridge Messenger:** `WHAT_PING` uyum yoklamasi icindir. `WHAT_PRESENT_STATE` (101) eski Bridge surumlerinde yoktur; Viewer bu durumda 20 sn bekleyip geri duser.
+* **(c) Viewer (APK/GitHub) guncelleyicisi:** T-Update imza semasindan bagimsizdir. Guven, Android paket imzasina dayanir.

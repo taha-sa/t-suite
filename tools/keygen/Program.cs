@@ -1,4 +1,6 @@
+using System.Security.AccessControl;
 using System.Security.Cryptography;
+using System.Security.Principal;
 using TSuite.Update;
 
 // tsuite-keygen gen <app>                        -> C:\Users\hp\.t-suite\keys\<app>.pem + <app>.pub
@@ -21,6 +23,12 @@ switch (cmd)
         Directory.CreateDirectory(keyDir);
         var (priv, pubB64) = UpdateSigning.GenerateKeyPair();
         File.WriteAllText(pem, priv);
+        // Ozel anahtar: kalitimi kapat, yalniz mevcut kullaniciya erisim ver.
+        var pemInfo = new FileInfo(pem);
+        var pemAcl = pemInfo.GetAccessControl();
+        pemAcl.SetAccessRuleProtection(true, false);
+        pemAcl.AddAccessRule(new FileSystemAccessRule(WindowsIdentity.GetCurrent().User!, FileSystemRights.FullControl, AccessControlType.Allow));
+        pemInfo.SetAccessControl(pemAcl);
         File.WriteAllText(pub, pubB64);
         Console.WriteLine(pubB64);
         return 0;
