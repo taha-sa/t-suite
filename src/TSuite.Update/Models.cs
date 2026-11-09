@@ -18,6 +18,18 @@ public sealed class AppUpdateState
 {
     [JsonPropertyName("lastCheckUtc")] public DateTime LastCheckUtc { get; set; }
     [JsonPropertyName("skippedVersion")] public string? SkippedVersion { get; set; }
+    /// <summary>"Sonra" denen bekleyen surum (ag olmadan gostermek icin; kurulum yine imzali manifeste dayanir).</summary>
+    [JsonPropertyName("pending")] public PendingUpdate? Pending { get; set; }
+}
+
+public sealed class PendingUpdate
+{
+    [JsonPropertyName("version")] public string Version { get; set; } = "";
+    [JsonPropertyName("url")] public string Url { get; set; } = "";
+    [JsonPropertyName("notes")] public string Notes { get; set; } = "";
+    [JsonPropertyName("sha256")] public string Sha256 { get; set; } = "";
+    [JsonPropertyName("pub_date")] public string? PubDate { get; set; }
+    [JsonPropertyName("savedUtc")] public DateTime SavedUtc { get; set; }
 }
 
 public sealed class UpdateStateFile
@@ -45,6 +57,10 @@ public sealed record UpdateTheme(
 }
 
 /// <summary>Guncelleme adayi / update candidate.</summary>
-public sealed record UpdateInfo(string CurrentVersion, string NewVersion, string Notes, string? PubDate, LatestManifest Manifest);
+public sealed record UpdateInfo(string CurrentVersion, string NewVersion, string Notes, string? PubDate, LatestManifest Manifest)
+{
+    /// <summary>Kalici bekleyen kayittan geldi (imza yok): indirmeden once manifest yeniden alinmali.</summary>
+    public bool IsPending => string.IsNullOrEmpty(Manifest.Signature);
+}
 
 public enum UpdateState { Idle, Checking, Available, Downloading, Launching, Failed }

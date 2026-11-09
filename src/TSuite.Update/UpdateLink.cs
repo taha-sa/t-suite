@@ -18,6 +18,9 @@ public static class UpdateLink
     {
         server.OnCommand(Check, async (d, ct) =>
         {
+            // Indirme/kurulum surerken yeniden kontrol etme: mevcut durumu raporla.
+            if (ctl.State is UpdateState.Downloading or UpdateState.Launching)
+                return LinkJson.Obj(("available", true), ("version", ctl.Info?.NewVersion ?? ""));
             bool avail = await ctl.CheckAsync(force: true, ct).ConfigureAwait(false);
             return LinkJson.Obj(("available", avail), ("version", ctl.Info?.NewVersion ?? ""));
         });

@@ -42,30 +42,104 @@ public sealed class UpdateController
         }
     }
 
+    int _busy; // 0 = bos, 1 = indirme/kurulum suruyor (Interlocked)
+
+    /// <summary>Elle kontrol: MinInterval atlanir. CheckAsync(force) ile ayni; API okunurlugu icin.</summary>
+    public Task<bool> CheckNow(bool force = true, CancellationToken ct = default) => CheckAsync(force, ct);
+
+    /// <summary>
+    /// Kalici "bekleyen" guncellemeyi agsiz yukler (varsa Available'a gecer, true doner).
+    /// Uygulama acilisinda cagrilabilir.
+    /// </summary>
+    public bool LoadPending()
+    {
+        if (State is UpdateState.Downloading or UpdateState.Launching) return false;
+        var p = _checker.GetPending();
+        if (p == null) return false;
+        Info = p;
+        Set(UpdateState.Available);
+        return true;
+    }
+
+    /// <summary>Periyodik kontrol (zorlamasiz; MinInterval gecerli). Donen nesne Dispose edilince durur.</summary>
+    public IDisposable PeriodicCheck(TimeSpan interval)
+    {
+        var cts = new CancellationTokenSource();
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                using var timer = new PeriodicTimer(interval);
+                while (await timer.WaitForNextTickAsync(cts.Token).ConfigureAwait(false))
+                {
+                    if (State is UpdateState.Idle or UpdateState.Failed)
+                        await CheckAsync(false, cts.Token).ConfigureAwait(false);
+                }
+            }
+            catch { }
+        });
+        return new PeriodicHandle(cts);
+    }
+
+    sealed class PeriodicHandle(CancellationTokenSource cts) : IDisposable
+    {
+        public void Dispose() { try { cts.Cancel(); cts.Dispose(); } catch { } }
+    }
+
+    /// <summary>Indirme/kurulum surerken true.</summary>
+    public bool IsBusy => Volatile.Read(ref _busy) == 1;
+
     public async Task StartUpdateAsync()
     {
-        if (Info == null || State is UpdateState.Downloading or UpdateState.Launching) return;
-        _cts = new CancellationTokenSource();
-        Progress = 0;
-        Set(UpdateState.Downloading);
+        if (Info == null) return;
+        // Tek indirme garantisi: kontrol-sonra-ata yarisi yok.
+        if (Interlocked.CompareExchange(ref _busy, 1, 0) != 0) return;
+        var cts = new CancellationTokenSource();
+        _cts = cts;
         try
         {
+            Progress = 0;
+            Set(UpdateState.Downloading);
+            var info = Info;
+            if (info == null) { Set(UpdateState.Idle); return; }
+            if (info.IsPending)
+            {
+                // Kalici kayit imzasiz: gercek manifesti ag uzerinden yeniden al.
+                var fresh = await _checker.CheckAsync(true, cts.Token).ConfigureAwait(false);
+                if (fresh == null) { Info = null; Set(UpdateState.Idle); return; }
+                Info = info = fresh;
+            }
             var prog = new Progress<double>(p => { Progress = p; ProgressChanged?.Invoke(p); });
-            var file = await _checker.DownloadAsync(Info, prog, _cts.Token).ConfigureAwait(false);
+            var file = await _checker.DownloadAsync(info, prog, cts.Token).ConfigureAwait(false);
             Set(UpdateState.Launching);
             UpdateChecker.LaunchUpdater(file);
             ExitRequested?.Invoke();
+        }
+        catch (OperationCanceledException)
+        {
+            // Iptal hata degildir: Idle (bekleyen bilgi Later() ile kalici yazilmistir).
+            Set(UpdateState.Idle);
         }
         catch (Exception ex)
         {
             Set(UpdateState.Failed, ex.Message);
         }
+        finally
+        {
+            if (State != UpdateState.Launching) Interlocked.Exchange(ref _busy, 0);
+        }
     }
 
-    public void Cancel() => _cts?.Cancel();
+    public void Cancel() { try { _cts?.Cancel(); } catch (ObjectDisposedException) { } }
 
-    /// <summary>"Sonra": kartı kapat; bir sonraki kontrolde yine gosterilir.</summary>
-    public void Later() { Cancel(); Set(UpdateState.Idle); }
+    /// <summary>"Sonra": karti kapat, bekleyen surumu kalici yaz (24 sa icinde yeniden aciliste agsiz gorunur).</summary>
+    public void Later()
+    {
+        var info = Info;
+        if (info != null) _checker.SavePending(info);
+        Cancel();
+        Set(UpdateState.Idle);
+    }
 
     /// <summary>"Bu surumu atla": bu surum bir daha onerilmez.</summary>
     public void Skip()

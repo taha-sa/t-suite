@@ -30,6 +30,8 @@ public sealed class UpdateChecker
     readonly HttpClient _http;
     readonly string _statePath;
     static readonly object StateLock = new();
+    /// <summary>Bekleyen guncelleme gecerlilik suresi.</summary>
+    public static readonly TimeSpan PendingTtl = TimeSpan.FromHours(24);
     static readonly Regex SemVerRx = new(@"^\d+\.\d+\.\d+(-[0-9A-Za-z.]+)?$", RegexOptions.CultureInvariant | RegexOptions.NonBacktracking);
 
     /// <summary>Imzasiz manifest surumu dosya yolunda/karsilastirmada kullanilmadan once katı SemVer denetimi.</summary>
@@ -55,6 +57,11 @@ public sealed class UpdateChecker
     {
         lock (StateLock)
         {
+            // Surecler arasi guvenlik (G14): adlandirilmis Mutex.
+            Mutex? mx = null; bool held = false;
+            try { mx = new Mutex(false, @"Local\TSuite.Update.State"); held = mx.WaitOne(3000); }
+            catch (AbandonedMutexException) { held = true; }
+            catch { }
             try
             {
                 var st = LoadState();
@@ -66,12 +73,35 @@ public sealed class UpdateChecker
                 File.Move(tmp, _statePath, true);
             }
             catch { /* durum yazilamazsa sessizce gec */ }
+            finally { try { if (held) mx?.ReleaseMutex(); } catch { } mx?.Dispose(); }
         }
     }
 
     public DateTime LastCheckUtc => LoadState().Apps.TryGetValue(_o.AppId, out var a) ? a.LastCheckUtc : default;
 
-    public void SkipVersion(string version) => SaveState(a => a.SkippedVersion = version);
+    public void SkipVersion(string version) => SaveState(a => { a.SkippedVersion = version; a.Pending = null; });
+
+    /// <summary>"Sonra": bekleyen surumu kalici yaz.</summary>
+    public void SavePending(UpdateInfo info) => SaveState(a => a.Pending = new PendingUpdate
+    {
+        Version = info.NewVersion, Url = info.Manifest.Url, Notes = info.Notes,
+        Sha256 = info.Manifest.Sha256, PubDate = info.PubDate, SavedUtc = DateTime.UtcNow
+    });
+
+    public void ClearPending() => SaveState(a => a.Pending = null);
+
+    /// <summary>Agsiz bekleyen guncelleme (24 sa icinde, guncel surumden yeni, atlanmamis); yoksa null. Imzasizdir (IsPending).</summary>
+    public UpdateInfo? GetPending()
+    {
+        var a = LoadState().Apps.GetValueOrDefault(_o.AppId);
+        var p = a?.Pending;
+        if (p == null || !IsValidVersion(p.Version) || string.IsNullOrEmpty(p.Url)) return null;
+        if (DateTime.UtcNow - p.SavedUtc > PendingTtl) return null;
+        if (!VersionUtil.IsNewer(_o.CurrentVersion, p.Version)) return null;
+        if (a!.SkippedVersion != null && VersionUtil.Compare(a.SkippedVersion, p.Version) == 0) return null;
+        var m = new LatestManifest { Version = p.Version, Notes = p.Notes, PubDate = p.PubDate, Url = p.Url, Sha256 = p.Sha256, Signature = "" };
+        return new UpdateInfo(_o.CurrentVersion, p.Version, p.Notes, p.PubDate, m);
+    }
 
     /// <summary>
     /// Guncelleme varsa UpdateInfo, yoksa (ya da 24 saat dolmadiysa / surum atlandiysa) null.
@@ -80,7 +110,7 @@ public sealed class UpdateChecker
     public async Task<UpdateInfo?> CheckAsync(bool force = false, CancellationToken ct = default)
     {
         var st = LoadState().Apps.GetValueOrDefault(_o.AppId);
-        if (!force && st != null && DateTime.UtcNow - st.LastCheckUtc < _o.MinInterval) return null;
+        if (!force && st != null && DateTime.UtcNow - st.LastCheckUtc < _o.MinInterval) return GetPending();
 
         if (!Uri.TryCreate(ManifestUrl, UriKind.Absolute, out var mu) || (mu.Scheme != Uri.UriSchemeHttps && !_o.AllowInsecureUrls))
             throw new UpdateVerificationException("Manifest URL must be https");
@@ -107,7 +137,7 @@ public sealed class UpdateChecker
 
         if (string.IsNullOrEmpty(m.Version) || string.IsNullOrEmpty(m.Url)) throw new InvalidDataException("incomplete latest.json");
         if (!IsValidVersion(m.Version)) throw new InvalidDataException("invalid version in latest.json");
-        if (!VersionUtil.IsNewer(_o.CurrentVersion, m.Version)) return null;
+        if (!VersionUtil.IsNewer(_o.CurrentVersion, m.Version)) { if (st?.Pending != null) ClearPending(); return null; }
         if (!force && st?.SkippedVersion != null && VersionUtil.Compare(st.SkippedVersion, m.Version) == 0) return null;
         return new UpdateInfo(_o.CurrentVersion, m.Version, m.Notes, m.PubDate, m);
     }
