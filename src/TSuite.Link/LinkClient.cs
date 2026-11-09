@@ -134,7 +134,10 @@ public sealed class LinkClient : IAsyncDisposable
             switch (env.Type)
             {
                 case LinkProtocol.TypeHello:
-                    Hello = env.Data is { } d ? JsonSerializer.Deserialize(d, LinkJsonContext.Default.HelloData) : new HelloData();
+                    var hd = env.Data is { } d ? JsonSerializer.Deserialize(d, LinkJsonContext.Default.HelloData) : new HelloData();
+                    // Protokol/uygulama uyusmazligi: baglantiyi reddet (finally temizler, Connected tetiklenmez).
+                    if (hd == null || hd.Protocol != LinkProtocol.Version || !string.Equals(hd.AppId, _appId, StringComparison.Ordinal)) return;
+                    Hello = hd;
                     _firstConnect.TrySetResult();
                     if (_prefixes.Length > 0) { try { await SendSubscribeAsync().ConfigureAwait(false); } catch { } }
                     try { Connected?.Invoke(Hello!); } catch { }

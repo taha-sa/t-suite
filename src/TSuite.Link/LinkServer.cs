@@ -26,6 +26,12 @@ public sealed class LinkServer : IAsyncDisposable
     /// <summary>Son-deger-kazanir olay adlari. "*.progress" gibi sonek desteklenir ("*" ile baslarsa).</summary>
     public List<string> CoalescedEvents { get; } = ["*.progress", "ram.status"];
     public int MaxQueuedEventsPerClient { get; set; } = 256;
+    /// <summary>Istemci basina bekleyen yanit ust siniri. Asilinca yeni yanit yerine kucuk "reply_queue_full" hatasi gider; 2x asilirsa oturum kapanir.</summary>
+    public int MaxQueuedReplies { get; set; } = 256;
+    /// <summary>Istemci basina eszamanli komut ust siniri; fazlasi "busy" hata yaniti alir.</summary>
+    public int MaxConcurrentCommandsPerClient { get; set; } = 8;
+    /// <summary>Tek yazim zaman asimi; asilinca oturum kapanir (yavas/olu okuyucu slotu birakir).</summary>
+    public TimeSpan WriteTimeout { get; set; } = TimeSpan.FromSeconds(10);
     public int ClientCount => _sessions.Count;
 
     public LinkServer(string appId, string version, string[] events, string[] commands, int maxClients = 16)
@@ -76,7 +82,7 @@ public sealed class LinkServer : IAsyncDisposable
             {
                 if (!s.Wants(name)) continue;
                 line ??= LinkJson.Serialize(new Envelope { Type = LinkProtocol.TypeEvent, Name = name, Id = key, Data = data, Ts = LinkJson.NowMs() });
-                s.EnqueueEvent(line, coalesce ? name + "|" + key : null);
+                s.EnqueueEvent(line, coalesce ? name + "|" + key : null, !coalesce && key != null && IsTerminal(name) ? key : null);
             }
             catch { }
         }
@@ -91,6 +97,11 @@ public sealed class LinkServer : IAsyncDisposable
         }
         return false;
     }
+
+    /// <summary>Bir kimligin son olayi: bekleyen coalesce girdileri (ornegin son progress) dusurulur ki sonradan gitmesin.</summary>
+    static bool IsTerminal(string name) =>
+        name.EndsWith(".completed", StringComparison.Ordinal) || name.EndsWith(".failed", StringComparison.Ordinal) ||
+        name.EndsWith(".canceled", StringComparison.Ordinal) || name.EndsWith(".cancelled", StringComparison.Ordinal);
 
     bool IsCoalesced(string name)
     {
@@ -157,12 +168,38 @@ public sealed class LinkServer : IAsyncDisposable
 
         void Signal() { try { _signal.Release(); } catch (SemaphoreFullException) { } catch (ObjectDisposedException) { } }
 
-        public void EnqueueReply(byte[] line) { lock (_lock) _replies.Enqueue(line); Signal(); }
+        int _running;
 
-        public void EnqueueEvent(byte[] line, string? coalesceKey)
+        public void EnqueueReply(byte[] line, Envelope? orig = null)
+        {
+            bool overflow = false;
+            lock (_lock)
+            {
+                int max = Math.Max(1, _srv.MaxQueuedReplies);
+                if (_replies.Count < max) _replies.Enqueue(line);
+                else if (_replies.Count < max * 2 && orig != null)
+                {
+                    var ed = LinkJson.Obj(("ok", false), ("error", "reply_queue_full"));
+                    _replies.Enqueue(LinkJson.Serialize(new Envelope { Type = LinkProtocol.TypeReply, Id = orig.Id, Name = orig.Name, Data = ed, Ts = LinkJson.NowMs() }));
+                }
+                else overflow = true; // istemci okumuyor: oturumu birak
+            }
+            if (overflow) Close(); else Signal();
+        }
+
+        public void EnqueueEvent(byte[] line, string? coalesceKey, string? terminalKey = null)
         {
             lock (_lock)
             {
+                if (terminalKey != null)
+                {
+                    var suffix = "|" + terminalKey;
+                    for (int i = _coalescedOrder.Count - 1; i >= 0; i--)
+                    {
+                        var k = _coalescedOrder[i];
+                        if (k.EndsWith(suffix, StringComparison.Ordinal)) { _coalesced.Remove(k); _coalescedOrder.RemoveAt(i); }
+                    }
+                }
                 if (coalesceKey != null)
                 {
                     if (!_coalesced.ContainsKey(coalesceKey)) _coalescedOrder.Add(coalesceKey);
@@ -226,7 +263,20 @@ public sealed class LinkServer : IAsyncDisposable
                         }
                         break;
                     case LinkProtocol.TypeCmd:
-                        _ = Task.Run(() => HandleCommand(env, ct), ct);
+                        if (Interlocked.Increment(ref _running) > Math.Max(1, _srv.MaxConcurrentCommandsPerClient))
+                        {
+                            Interlocked.Decrement(ref _running);
+                            var bd = LinkJson.Obj(("ok", false), ("error", "busy"));
+                            EnqueueReply(LinkJson.Serialize(new Envelope { Type = LinkProtocol.TypeReply, Id = env.Id, Name = env.Name, Data = bd, Ts = LinkJson.NowMs() }), env);
+                            break;
+                        }
+                        var e2 = env;
+                        _ = Task.Run(async () =>
+                        {
+                            try { await HandleCommand(e2, ct).ConfigureAwait(false); }
+                            catch { }
+                            finally { Interlocked.Decrement(ref _running); }
+                        }, ct);
                         break;
                     // bilinmeyen tipler yoksayilir (ileri uyumluluk) / unknown types ignored
                 }
@@ -245,7 +295,7 @@ public sealed class LinkServer : IAsyncDisposable
             JsonElement data = error == null
                 ? LinkJson.Obj(("ok", true), ("result", result.HasValue ? (object)result.Value : null))
                 : LinkJson.Obj(("ok", false), ("error", error));
-            EnqueueReply(LinkJson.Serialize(new Envelope { Type = LinkProtocol.TypeReply, Id = env.Id, Name = env.Name, Data = data, Ts = LinkJson.NowMs() }));
+            EnqueueReply(LinkJson.Serialize(new Envelope { Type = LinkProtocol.TypeReply, Id = env.Id, Name = env.Name, Data = data, Ts = LinkJson.NowMs() }), env);
         }
 
         async Task WriteLoop(CancellationToken ct)
@@ -264,11 +314,15 @@ public sealed class LinkServer : IAsyncDisposable
                         foreach (var k in _coalescedOrder) batch.Add(_coalesced[k]);
                         _coalesced.Clear(); _coalescedOrder.Clear();
                     }
-                    foreach (var b in batch) await _pipe.WriteAsync(b, ct).ConfigureAwait(false);
-                    if (batch.Count > 0) await _pipe.FlushAsync(ct).ConfigureAwait(false);
+                    if (batch.Count == 0) continue;
+                    // Yazim zaman asimi: okumayan istemci slotu sonsuza dek tutmasin.
+                    using var wc = CancellationTokenSource.CreateLinkedTokenSource(ct);
+                    wc.CancelAfter(_srv.WriteTimeout);
+                    foreach (var b in batch) await _pipe.WriteAsync(b, wc.Token).ConfigureAwait(false);
+                    await _pipe.FlushAsync(wc.Token).ConfigureAwait(false);
                 }
             }
-            catch { _closed = true; }
+            catch { _closed = true; Close(); }
         }
     }
 }

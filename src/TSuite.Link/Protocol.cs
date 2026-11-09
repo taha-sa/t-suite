@@ -40,6 +40,28 @@ public sealed class AppManifest
     [JsonPropertyName("icon")] public string? Icon { get; set; }
     /// <summary>Calisan surecin PID'i (0 = calismiyor) / running process id.</summary>
     [JsonPropertyName("pid")] public int Pid { get; set; }
+    /// <summary>Istege bagli: hub'in telefona ileteceg olay onekleri. Yoksa <see cref="EffectiveForwardPrefixes"/> events'ten turetir.</summary>
+    [JsonPropertyName("forwardPrefixes")] public string[]? ForwardPrefixes { get; set; }
+    /// <summary>Istege bagli: uygulama kapaliyken baslatma argumanlari. Yoksa argumansiz.</summary>
+    [JsonPropertyName("launchArgs")] public string[]? LaunchArgs { get; set; }
+
+    /// <summary>forwardPrefixes varsa o, yoksa <c>events</c> adlarinin onekleri ("download.progress" -> "download.").</summary>
+    public string[] EffectiveForwardPrefixes()
+    {
+        if (ForwardPrefixes != null) return ForwardPrefixes;
+        var set = new List<string>();
+        foreach (var e in Events)
+        {
+            if (string.IsNullOrEmpty(e)) continue;
+            int i = e.IndexOf('.');
+            var p = i >= 0 ? e[..(i + 1)] : e;
+            if (!set.Contains(p)) set.Add(p);
+        }
+        return set.ToArray();
+    }
+
+    /// <summary>launchArgs varsa o, yoksa bos.</summary>
+    public string[] EffectiveLaunchArgs() => LaunchArgs ?? [];
 }
 
 public sealed class SubscribeData

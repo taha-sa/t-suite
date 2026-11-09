@@ -19,9 +19,12 @@ Her uygulama acilista `%LOCALAPPDATA%\T-Suite\apps\<id>.json` yazar (atomik: tmp
   "commands": ["download.add", "download.pause", "download.resume", "app.show", "app.version"],
   "releasesRepo": "taha-sa/t-downloader-releases",
   "icon": "C:\\...\\icon.ico",
-  "pid": 12345                      // 0 = calismiyor
+  "pid": 12345,                     // 0 = calismiyor
+  "forwardPrefixes": ["download.", "app.update."],  // ISTEGE BAGLI: hub'in telefona iletecegi olay onekleri
+  "launchArgs": ["--tray"]          // ISTEGE BAGLI: kapaliyken baslatma argumanlari
 }
 ```
+* `forwardPrefixes` yoksa varsayilan `events` adlarindaki onekler (`download.progress` -> `download.`); `launchArgs` yoksa argumansiz. Mevcut uygulamalar (RamCash, Downloader, DeskTree) bu alanlar olmadan aynen calisir. SDK: `AppManifest.EffectiveForwardPrefixes()` / `EffectiveLaunchArgs()` (T-Bridge bunlari kullanir).
 Bilinmeyen alanlar yoksayilir (ileri uyumluluk). Hub, uygulamayi `events`/`commands` listesinden **kesfeder**; kodda uygulama-ozel bilgi yoktur.
 
 ## 2. Named pipe
@@ -52,7 +55,8 @@ Akis / flow:
 4. Sunucu abonelige uyan `event`'leri yayinlar.
 
 ## 4. Backpressure
-Sunucu `Publish` asla bloklamaz (UI thread'inden cagrilabilir). Istemci basina: yanit kuyrugu (hic dusmez), olay kuyrugu (en fazla 256; dolunca **en eski dusurulur**) ve coalesce tablosu. `*.progress` ve `ram.status` olaylari `(name, id)` basina **son deger kazanir** (ara degerler atilir). Bu nedenle `*.progress` olaylari **tam durum** tasimali (delta degil).
+Sunucu `Publish` asla bloklamaz (UI thread'inden cagrilabilir). Istemci basina: yanit kuyrugu (en fazla `MaxQueuedReplies`=256; dolunca yeni yanit yerine `{ok:false,error:"reply_queue_full"}` gider, 2x asilirsa oturum kapanir; en eski yanit dusurulmez), eszamanli komut siniri (`MaxConcurrentCommandsPerClient`=8; fazlasi `{ok:false,error:"busy"}`), yazim zaman asimi (`WriteTimeout`=10 sn; asilinca oturum kapanir), olay kuyrugu (en fazla 256; dolunca **en eski dusurulur**) ve coalesce tablosu. `*.progress` ve `ram.status` olaylari `(name, id)` basina **son deger kazanir** (ara degerler atilir). Bu nedenle `*.progress` olaylari **tam durum** tasimali (delta degil). **Sira garantisi:** `*.completed|failed|canceled` olayi bir kimlik (`id`) icin yayimlandiginda, o kimligin bekleyen coalesce girdileri (son `*.progress`) dusurulur; terminal olaydan sonra o kimlik icin progress gelmez.
+**Istemci Hello dogrulamasi:** `LinkClient`, Hello'daki `protocol` ve `appId` beklenenle eslesmezse baglantiyi reddeder (`Connected` tetiklenmez, yeniden dener).
 
 ## 5. Ilk olaylar / Initial events
 | ad | data |
@@ -95,6 +99,8 @@ Komutlar uygulamanin kendi thread'ine yonlendirilmelidir: sunucu handler'i threa
 ```json
 {"version":"1.2.0","notes":"...","pub_date":"2026-11-09T12:00:00Z","url":"https://github.com/taha-sa/<app>-releases/releases/download/v1.2.0/<File>","sha256":"<hex>","signature":"<base64>"}
 ```
+* **Bekleyen guncelleme (kalici):** "Sonra" denince `update-state.json` icinde `apps.<id>.pending` (`version,url,notes,sha256,pub_date,savedUtc`; IMZASIZ, yalniz gostermek icin) yazilir. 24 saat icinde acilista `UpdateController.LoadPending()` / `UpdateChecker.GetPending()` agsiz gosterir; kurulum `UpdateInfo.IsPending` ise once imzali manifesti yeniden alir. Durum dosyasi surecler arasi adlandirilmis Mutex (`Local\TSuite.Update.State`) ile korunur.
+* **UpdateController API (geriye uyumlu eklemeler):** `CheckNow(force=true)` (MinInterval'i atlar), `PeriodicCheck(TimeSpan)` -> `IDisposable`, `LoadPending()`, `IsBusy`. `StartUpdateAsync` eszamanli cagrilarda tek indirme baslatir; `Later()`/`Cancel()` iptali `Failed` degil `Idle` yapar. `app.update.check` indirme/kurulum surerken `available:true` + mevcut surumu raporlar.
 * Kontrol: acilista + en fazla 24 saatte bir (`%LOCALAPPDATA%\T-Suite\update-state.json`, uygulama basina `lastCheckUtc`, `skippedVersion`).
 * Indirme URL'si **https** olmali. Gecici klasore indirilir.
 * **Dogrulama (ikisi de zorunlu):** (1) dosyanin SHA-256 degeri `sha256` ile esit; (2) `signature` = ECDSA P-256 / SHA-256, IEEE-P1363 (r||s) base64, su UTF-8 mesaj uzerinde:
