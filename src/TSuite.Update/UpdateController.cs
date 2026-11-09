@@ -12,6 +12,18 @@ public sealed class UpdateController
 
     public UpdateController(UpdateChecker checker) { _checker = checker; }
 
+    public UpdateChannel Channel
+    {
+        get => _checker.Channel;
+        set
+        {
+            if (IsBusy || State == UpdateState.Checking) throw new InvalidOperationException("Update is busy");
+            _checker.Channel = value;
+            Info = null;
+            Set(UpdateState.Idle);
+        }
+    }
+
     public UpdateState State { get; private set; } = UpdateState.Idle;
     public UpdateInfo? Info { get; private set; }
     public double Progress { get; private set; }
@@ -135,6 +147,7 @@ public sealed class UpdateController
     /// <summary>"Sonra": karti kapat, bekleyen surumu kalici yaz (24 sa icinde yeniden aciliste agsiz gorunur).</summary>
     public void Later()
     {
+        if (Info?.IsRequired == true) return;
         var info = Info;
         if (info != null) _checker.SavePending(info);
         Cancel();
@@ -144,6 +157,7 @@ public sealed class UpdateController
     /// <summary>"Bu surumu atla": bu surum bir daha onerilmez.</summary>
     public void Skip()
     {
+        if (Info?.IsRequired == true) return;
         if (Info != null) _checker.SkipVersion(Info.NewVersion);
         Info = null;
         Set(UpdateState.Idle);

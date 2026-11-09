@@ -13,6 +13,40 @@ public static class UpdateSigning
     public static byte[] Canonical(string appId, string version, string sha256Hex)
         => Encoding.UTF8.GetBytes($"tsuite-update-v1\n{appId}\n{version}\n{sha256Hex.ToLowerInvariant()}");
 
+    public static byte[] CanonicalV2(string appId, LatestManifest m)
+    {
+        if (!UpdateChecker.IsValidVersion(m.Version) ||
+            (m.MinVersion != null && !UpdateChecker.IsValidVersion(m.MinVersion)) ||
+            (m.BlockedVersions != null && m.BlockedVersions.Any(v => !UpdateChecker.IsValidVersion(v))) ||
+            (m.Channel != null && m.Channel is not ("stable" or "beta")))
+            throw new UpdateVerificationException("Invalid update safety fields");
+        return Encoding.UTF8.GetBytes($"tsuite-update-v2\n{appId}\n{m.Version}\n{m.Sha256.ToLowerInvariant()}\n{m.MinVersion}\n{string.Join(",", m.BlockedVersions ?? [])}\n{m.Channel}");
+    }
+
+    public static string SignV2(ECDsa key, string appId, LatestManifest m)
+        => Convert.ToBase64String(key.SignData(CanonicalV2(appId, m), HashAlgorithmName.SHA256,
+            DSASignatureFormat.IeeeP1363FixedFieldConcatenation));
+
+    public static bool VerifySignatureV2(string key, string appId, LatestManifest m)
+    {
+        try
+        {
+            using var ec = ECDsa.Create();
+            ec.ImportSubjectPublicKeyInfo(Convert.FromBase64String(key), out _);
+            return ec.VerifyData(CanonicalV2(appId, m), Convert.FromBase64String(m.Signature2 ?? ""),
+                HashAlgorithmName.SHA256, DSASignatureFormat.IeeeP1363FixedFieldConcatenation);
+        }
+        catch { return false; }
+    }
+
+    public static void VerifySafetyFields(IEnumerable<string> keys, string appId, LatestManifest m)
+    {
+        if (!m.HasSafetyFields) return;
+        if (!keys.Any(k => (string.IsNullOrEmpty(m.KeyId) || string.Equals(KeyId(k), m.KeyId, StringComparison.OrdinalIgnoreCase))
+            && VerifySignature(k, appId, m.Version, m.Sha256, m.Signature) && VerifySignatureV2(k, appId, m)))
+            throw new UpdateVerificationException("Invalid signature2");
+    }
+
     public static string Sha256Hex(string path)
     {
         using var fs = File.OpenRead(path);
@@ -86,6 +120,8 @@ public static class UpdateSigning
     /// <summary>Dosyanin hash'ini ve imzayi dogrular; uyusmazlikta UpdateVerificationException.</summary>
     public static void VerifyFile(string filePath, LatestManifest m, string appId, string publicKeyBase64)
     {
+        VerifySafetyFields([publicKeyBase64], appId, m);
+        if (m.IsBlocked(m.Version)) throw new UpdateVerificationException("Offered version is blocked");
         var actual = Sha256Hex(filePath);
         if (!string.Equals(actual, m.Sha256, StringComparison.OrdinalIgnoreCase))
             throw new UpdateVerificationException("SHA-256 mismatch");
@@ -96,6 +132,8 @@ public static class UpdateSigning
     /// <summary>Coklu anahtar surumu; m.KeyId varsa yalniz o anahtar denenir.</summary>
     public static void VerifyFile(string filePath, LatestManifest m, string appId, IReadOnlyList<string> trustedKeys)
     {
+        VerifySafetyFields(trustedKeys, appId, m);
+        if (m.IsBlocked(m.Version)) throw new UpdateVerificationException("Offered version is blocked");
         var actual = Sha256Hex(filePath);
         if (!string.Equals(actual, m.Sha256, StringComparison.OrdinalIgnoreCase))
             throw new UpdateVerificationException("SHA-256 mismatch");

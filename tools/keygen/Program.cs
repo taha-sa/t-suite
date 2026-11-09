@@ -5,7 +5,7 @@ using TSuite.Update;
 
 // tsuite-keygen gen <app>                        -> C:\Users\hp\.t-suite\keys\<app>.pem + <app>.pub
 // tsuite-keygen pub <app>                        -> genel anahtari yazdirir
-// tsuite-keygen sign <app> <version> <sha256hex> [key.pem] -> imzayi (base64) yazdirir
+// sign <app> <version> <sha> [key.pem] [--min-version V] [--blocked-versions V,V] [--channel stable|beta] -> JSON: signature + signature2
 // tsuite-keygen rotate <app> [revokeId,...]      -> <app>.next.pem/.pub uretir, rotasyon kaydini ESKI ozel anahtarla imzalar, JSON yazdirir
 // Ozel anahtar ASLA yazdirilmaz / the private key is never printed.
 
@@ -53,8 +53,28 @@ switch (cmd)
         if (args.Length < 4) return 2;
         using (var ec = ECDsa.Create())
         {
-            ec.ImportFromPem(File.ReadAllText(args.Length > 4 ? args[4] : pem));
-            Console.WriteLine(UpdateSigning.Sign(ec, app, args[2], args[3]));
+            var index = 4;
+            var keyPath = args.Length > index && !args[index].StartsWith("--") ? args[index++] : pem;
+            var manifest = new LatestManifest { Version = args[2], Sha256 = args[3] };
+            while (index < args.Length)
+            {
+                var option = args[index++];
+                if (index >= args.Length) return 2;
+                var value = args[index++];
+                switch (option)
+                {
+                    case "--min-version": manifest.MinVersion = value; break;
+                    case "--blocked-versions": manifest.BlockedVersions = value.Split(',', StringSplitOptions.RemoveEmptyEntries).ToList(); break;
+                    case "--channel": manifest.Channel = value; break;
+                    default: return 2;
+                }
+            }
+            ec.ImportFromPem(File.ReadAllText(keyPath));
+            Console.WriteLine(System.Text.Json.JsonSerializer.Serialize(new
+            {
+                signature = UpdateSigning.Sign(ec, app, manifest.Version, manifest.Sha256),
+                signature2 = UpdateSigning.SignV2(ec, app, manifest)
+            }));
         }
         return 0;
     default: return 2;

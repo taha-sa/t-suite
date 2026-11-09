@@ -17,6 +17,8 @@ param(
   [string]$KeyPath,
   [string]$ApplicationId,
   [ValidateSet('stable', 'beta')][string]$Channel = 'stable',
+  [string]$MinVersion,
+  [string[]]$BlockedVersions = @(),
   [string]$ReleaseRepo = $env:TSUITE_RELEASE_REPO
 )
 $ErrorActionPreference = 'Stop'
@@ -61,10 +63,14 @@ $sha = (Get-FileHash $artifact -Algorithm SHA256).Hash.ToLowerInvariant()
 Write-Host "==> sha256 $sha"
 
 $keygenProj = Join-Path $SuiteRoot 'tools\keygen\keygen.csproj'
-$signatureOutput = dotnet run --project $keygenProj -c Release -v q -- sign $AppId $Version $sha $keyPem
+$signArgs = @('sign', $AppId, $Version, $sha, $keyPem, '--channel', $Channel)
+if ($MinVersion) { $signArgs += @('--min-version', $MinVersion) }
+if ($BlockedVersions.Count) { $signArgs += @('--blocked-versions', ($BlockedVersions -join ',')) }
+$signatureOutput = dotnet run --project $keygenProj -c Release -v q -- @signArgs
 if ($LASTEXITCODE -ne 0) { throw 'imza uretilemedi' }
 $sig = [string]($signatureOutput | Select-Object -Last 1)
-$sig = $sig.Trim()
+$signatures = $sig.Trim() | ConvertFrom-Json
+$sig = $signatures.signature
 if (-not $sig) { throw 'imza uretilemedi' }
 
 $url = "https://github.com/$repo/releases/download/v$Version/$ArtifactAs"
@@ -75,19 +81,35 @@ $latest = [ordered]@{
   url      = $url
   sha256   = $sha
   signature = $sig
+  signature2 = $signatures.signature2
   channel   = $Channel
 }
-$latestPath = Join-Path $out 'latest.json'
+if ($MinVersion) { $latest.min_version = $MinVersion }
+if ($BlockedVersions.Count) { $latest.blocked_versions = @($BlockedVersions) }
+$latestPath = Join-Path $out 'latest-beta.json'
 [IO.File]::WriteAllText($latestPath, ($latest | ConvertTo-Json), (New-Object Text.UTF8Encoding($false)))
+$manifestPaths = @($latestPath)
+if ($Channel -eq 'stable') {
+  $stablePath = Join-Path $out 'latest.json'
+  Copy-Item -LiteralPath $latestPath -Destination $stablePath
+  $manifestPaths += $stablePath
+}
 Write-Host "==> $latestPath yazildi"
 
 if ($Publish -and -not $NoPublish) {
   Write-Host "==> gh release create v$Version --repo $repo"
-  $releaseArgs = @('release', 'create', "v$Version", $artifact, $latestPath, '--repo', $repo, '--title', "$AppId v$Version")
+  $releaseArgs = @('release', 'create', "v$Version", $artifact) + $manifestPaths + @( '--repo', $repo, '--title', "$AppId v$Version")
   if ($Notes) { $releaseArgs += @('--notes', $Notes) } else { $releaseArgs += '--generate-notes' }
   if ($Channel -eq 'beta') { $releaseArgs += '--prerelease' }
   gh @releaseArgs
   if ($LASTEXITCODE -ne 0) { throw 'gh release create basarisiz' }
+  if ($Channel -eq 'beta') {
+    # /releases/latest excludes prereleases: put the beta pointer beside the stable manifest.
+    $stableTag = gh api "repos/$repo/releases/latest" --jq '.tag_name'
+    if ($LASTEXITCODE -ne 0) { throw 'Publish a stable baseline before beta releases' }
+    gh release upload $stableTag $latestPath --repo $repo --clobber
+    if ($LASTEXITCODE -ne 0) { throw 'Beta pointer upload failed' }
+  }
 } else {
   Write-Host "==> YAYINLANMADI (-Publish verilmedi). Dosyalar: $out"
 }

@@ -119,6 +119,54 @@ Komutlar uygulamanin kendi thread'ine yonlendirilmelidir: sunucu handler'i threa
 * **Sira (kurulu 1.1.0 istemcilerle):** 1.1.0 istemcileri YALNIZ gomulu eski anahtari bilir ve rotasyon kaydini ogrenemez; bu yuzden (1) yeni anahtari uygulamalara gomup (`TrustedPublicKeysBase64`) yeni surumu ESKI anahtarla imzalayip yayinla (`tsuite-keygen rotate <app>` ile uretilen kaydi manifeste `key_rotation` olarak ekle) -> kurulu istemciler bu surumle yeni anahtari hem gomulu hem kalici olarak edinir; (2) istemcilerin cogu yeni surume gecince manifesti YENI anahtarla imzala (`key_id` ekle); 1.1.0'da kalanlar yeni imzayi dogrulayamaz, bu yuzden eski anahtarla imzali bir kopruden surum bir sure daha yayinlanmali; (3) bir surum sonra `revoke_key_ids` ile eski anahtari dusur. 1.1.0 istemcileri icin dogrudan (tek adimda) rotasyon MUMKUN DEGILDIR: gecis yolu yukaridaki kopru surumudur.
 * **Iptal / sizinti:** eski ozel anahtar sizarsa saldirgan o anahtarla sahte surum ve (iptal edilmemisse) sahte rotasyon imzalayabilir. Hemen yeni anahtarla bir `key_rotation` (iptal listesinde sizan anahtar) yayinlayin; yeni anahtar bu kayit bir kez islenince gecerli olur, ancak henuz kaydi gormemis istemciler (ve 1.1.0) sizan anahtarla kandirilabilir: bu istemciler icin tek cozum yeni anahtar gomulu bir surumun elle kurulmasidir. `tsuite-keygen rotate <app> [iptalId,...]` kaydi eski ozel anahtarla imzalar, yeni cifti `<app>.next.pem/.pub` olarak yazar (ozel anahtar ASLA yazdirilmaz); sonra `<app>.next.*` dosyalari `<app>.*` olarak elle terfi ettirilir.
 
+### 8.2 Emergency brake and release channels
+
+Optional manifest fields: `min_version` (SemVer), `blocked_versions` (SemVer array),
+and `channel` (`stable` or `beta`). A current version below `min_version` or listed
+in `blocked_versions` makes a newer offered update required, overriding skippedVersion.
+UpdateCard hides Sonra / Bu sürümü atla, consumes Esc without dismissing, and displays:
+"Bu sürüm artık desteklenmiyor; devam etmek için güncelleyin."
+An offered version in `blocked_versions` is never downloaded or installed, even with force.
+A blocked offer yields no candidate; publish a newer safe offer to remediate.
+
+The existing `signature` and v1 canonical message remain unchanged for installed 1.1.0
+clients. New clients require both signatures from the same trusted key whenever ANY
+of these three fields is present (including explicit null); invalid/missing signature2
+rejects the manifest before applying policy. With all three absent, legacy v1 behavior
+applies. These fields are not inferred from unsigned pending state.
+`signature2` uses ECDSA P-256/SHA-256, IEEE-P1363 base64 over UTF-8, LF separators,
+no final newline:
+
+```text
+tsuite-update-v2
+<appId>
+<version>
+<sha256 lowercase>
+<min_version or empty>
+<blocked_versions joined by comma, in array order, or empty>
+<channel or empty>
+```
+
+Versions must pass the existing strict version syntax; blocked list order is preserved,
+not sorted. Key selection and rotation follow §8.1. Old clients ignore the added fields
+and continue checking v1; they cannot enforce the emergency brake until upgraded.
+
+`UpdateOptions.Channel`: `UpdateChannel.Stable` (default) or `Beta`.
+`UpdateController.Channel` get/set persists a per-app `apps.<id>.channel` preference in
+update-state.json, overriding the option on later launches. Changing it clears pending,
+skip and last-check state; changing during checking/installing is rejected.
+Stable clients fetch only latest.json and reject beta offers. Beta clients first fetch
+latest-beta.json beside ManifestUrl, falling back to latest.json only on HTTP 404;
+invalid signatures, malformed manifests and other HTTP errors never trigger fallback.
+The default base URL remains the §8 URL. GitHub excludes prereleases from releases/latest,
+so beta publication also uploads latest-beta.json onto the current stable release.
+Publish a stable baseline first. Stable releases publish identical signed manifests as
+both latest.json and latest-beta.json, moving beta users onto stable too.
+
+`tools/keygen sign <app> <version> <sha> [key.pem] [--min-version V] [--blocked-versions V,V] [--channel stable|beta]`
+emits JSON containing both signatures. The release template accepts `-MinVersion`,
+`-BlockedVersions`, and `-Channel` and signs these exact values.
+
 ## 9. Standart guncelleme komutlari / Standard update commands
 
 

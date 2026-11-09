@@ -15,6 +15,7 @@ public sealed class UpdateOptions
     public IReadOnlyList<string>? TrustedPublicKeysBase64 { get; init; }
     /// <summary>Varsayilan: https://github.com/taha-sa/{AppId}-releases/releases/latest/download/latest.json</summary>
     public string? ManifestUrl { get; init; }
+    public UpdateChannel Channel { get; init; } = UpdateChannel.Stable;
     public string? StatePath { get; init; }
     public TimeSpan MinInterval { get; init; } = TimeSpan.FromHours(24);
     public HttpClient? Http { get; init; }
@@ -48,6 +49,16 @@ public sealed class UpdateChecker
     }
 
     public string ManifestUrl => _o.ManifestUrl ?? $"https://github.com/taha-sa/{_o.AppId}-releases/releases/latest/download/latest.json";
+
+    public UpdateChannel Channel
+    {
+        get => LoadState().Apps.GetValueOrDefault(_o.AppId)?.Channel ?? _o.Channel;
+        set
+        {
+            if (!Enum.IsDefined(value)) throw new ArgumentOutOfRangeException(nameof(value));
+            SaveState(a => { a.Channel = value; a.LastCheckUtc = default; a.Pending = null; a.SkippedVersion = null; });
+        }
+    }
 
     UpdateStateFile LoadState()
     {
@@ -151,7 +162,7 @@ public sealed class UpdateChecker
         if (!Uri.TryCreate(ManifestUrl, UriKind.Absolute, out var mu) || (mu.Scheme != Uri.UriSchemeHttps && !_o.AllowInsecureUrls))
             throw new UpdateVerificationException("Manifest URL must be https");
 
-        using var resp = await _http.GetAsync(ManifestUrl, ct).ConfigureAwait(false);
+        using var resp = await FetchManifestAsync(ct).ConfigureAwait(false);
         resp.EnsureSuccessStatusCode();
         if (resp.Content.Headers.ContentLength is long cl && cl > _o.MaxManifestBytes)
             throw new InvalidDataException("latest.json too large");
@@ -174,14 +185,32 @@ public sealed class UpdateChecker
 
         if (string.IsNullOrEmpty(m.Version) || string.IsNullOrEmpty(m.Url)) throw new InvalidDataException("incomplete latest.json");
         if (!IsValidVersion(m.Version)) throw new InvalidDataException("invalid version in latest.json");
+        UpdateSigning.VerifySafetyFields(GetTrustedKeys(), _o.AppId, m);
+        if (m.IsBlocked(m.Version)) { ClearPending(); return null; }
+        if (Channel == UpdateChannel.Stable && m.Channel == "beta") { ClearPending(); return null; }
+        var info = new UpdateInfo(_o.CurrentVersion, m.Version, m.Notes, m.PubDate, m);
         if (!VersionUtil.IsNewer(_o.CurrentVersion, m.Version)) { if (st?.Pending != null) ClearPending(); return null; }
-        if (!force && st?.SkippedVersion != null && VersionUtil.Compare(st.SkippedVersion, m.Version) == 0) return null;
-        return new UpdateInfo(_o.CurrentVersion, m.Version, m.Notes, m.PubDate, m);
+        if (!force && !info.IsRequired && st?.SkippedVersion != null && VersionUtil.Compare(st.SkippedVersion, m.Version) == 0) return null;
+        return info;
+    }
+
+    async Task<HttpResponseMessage> FetchManifestAsync(CancellationToken ct)
+    {
+        if (Channel == UpdateChannel.Beta)
+        {
+            var beta = await _http.GetAsync(new Uri(new Uri(ManifestUrl), "latest-beta.json"), ct).ConfigureAwait(false);
+            if (beta.StatusCode != System.Net.HttpStatusCode.NotFound) return beta;
+            beta.Dispose();
+        }
+        return await _http.GetAsync(ManifestUrl, ct).ConfigureAwait(false);
     }
 
     /// <summary>Gecici klasore indirir (ilerleme 0..1), SHA-256 + imzayi dogrular. Basarisizlikta dosya silinir.</summary>
     public async Task<string> DownloadAsync(UpdateInfo info, IProgress<double>? progress = null, CancellationToken ct = default)
     {
+        UpdateSigning.VerifySafetyFields(GetTrustedKeys(), _o.AppId, info.Manifest);
+        if (info.Manifest.IsBlocked(info.Manifest.Version)) throw new UpdateVerificationException("Offered version is blocked");
+        if (Channel == UpdateChannel.Stable && info.Manifest.Channel == "beta") throw new UpdateVerificationException("Beta release on stable channel");
         var uri = new Uri(info.Manifest.Url);
         if (uri.Scheme != Uri.UriSchemeHttps && !_o.AllowInsecureUrls)
             throw new UpdateVerificationException("Download URL must be https");

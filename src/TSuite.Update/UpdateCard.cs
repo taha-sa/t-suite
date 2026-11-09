@@ -101,7 +101,7 @@ public sealed class UpdateCard : Form
         finally { _positioning = false; }
     }
 
-    void Later() { _c.Later(); Close(); }
+    void Later() { if (_c.Info?.IsRequired == true) return; _c.Later(); Close(); }
 
     protected override bool ProcessCmdKey(ref Message msg, Keys keyData)
     {
@@ -115,7 +115,7 @@ public sealed class UpdateCard : Form
         _primary.Enabled = !Busy;
         _primary.Text = Busy ? "Bekleyin…" : _c.State == UpdateState.Failed ? "Tekrar dene" : "Şimdi güncelle";
         _primary.AccessibleName = _primary.Text;
-        _later.Visible = _skip.Visible = !Busy;
+        _later.Visible = _skip.Visible = !Busy && _c.Info?.IsRequired != true;
         Invalidate(true);
     }
 
@@ -167,6 +167,7 @@ public sealed class UpdateCard : Form
         using (var gp = RoundRect(_notesRect, S(8))) using (var b = new SolidBrush(_t.Surface)) g.FillPath(b, gp);
         var inner = Rectangle.Inflate(_notesRect, -S(10), -S(8));
         string notes = st == UpdateState.Failed ? "Hata: " + _c.Error : (info?.Notes ?? "");
+        if (info?.IsRequired == true) notes = "Bu s\u00fcr\u00fcm art\u0131k desteklenmiyor; devam etmek i\u00e7in g\u00fcncelleyin.\n\n" + notes;
         var flags = TextFormatFlags.WordBreak | TextFormatFlags.NoPadding | TextFormatFlags.Left | TextFormatFlags.Top;
         var sz = TextRenderer.MeasureText(g, notes, _body, new Size(inner.Width, int.MaxValue), flags);
         _notesTotal = sz.Height;

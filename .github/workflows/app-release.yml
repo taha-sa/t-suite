@@ -17,6 +17,14 @@ on:
       channel:
         type: string
         default: stable
+      min_version:
+        description: Oldest supported client version
+        type: string
+        default: ''
+      blocked_versions:
+        description: Comma-separated blocked versions
+        type: string
+        default: ''
     secrets:
       UPDATE_SIGNING_KEY:
         required: true
@@ -33,7 +41,7 @@ jobs:
     runs-on: windows-latest
     environment: release
     concurrency:
-      group: release-${{ inputs.app_id }}-${{ inputs.channel }}
+      group: release-${{ inputs.app_id }}
       cancel-in-progress: false
     steps:
       - uses: actions/checkout@v4
@@ -55,6 +63,8 @@ jobs:
         env:
           APP_ID: ${{ inputs.app_id }}
           RELEASE_VERSION: ${{ inputs.version }}
+          MIN_VERSION: ${{ inputs.min_version }}
+          BLOCKED_VERSIONS: ${{ inputs.blocked_versions }}
           RELEASE_CHANNEL: ${{ inputs.channel }}
           TSUITE_RELEASE_REPO: ${{ inputs.release_repo }}
           TSuiteRoot: ${{ github.workspace }}/t-suite
@@ -72,7 +82,10 @@ jobs:
             [IO.File]::WriteAllText($keyPath, $env:UPDATE_SIGNING_KEY, [Text.UTF8Encoding]::new($false))
             Remove-Item Env:UPDATE_SIGNING_KEY
             # The app's configured template owns artifact creation, signing and gh release create.
-            & ./release.ps1 -Version $version -Publish -ApplicationId $env:APP_ID -KeyPath $keyPath -Channel $env:RELEASE_CHANNEL -ReleaseRepo $env:TSUITE_RELEASE_REPO
+            $safetyArgs = @{}
+            if ($env:MIN_VERSION) { $safetyArgs.MinVersion = $env:MIN_VERSION }
+            if ($env:BLOCKED_VERSIONS) { $safetyArgs.BlockedVersions = $env:BLOCKED_VERSIONS.Split(',') }
+            & ./release.ps1 @safetyArgs -Version $version -Publish -ApplicationId $env:APP_ID -KeyPath $keyPath -Channel $env:RELEASE_CHANNEL -ReleaseRepo $env:TSUITE_RELEASE_REPO
             if ($LASTEXITCODE -ne 0) { throw "release.ps1 failed ($LASTEXITCODE)" }
           } finally {
             if (Test-Path -LiteralPath $keyPath) { Remove-Item -LiteralPath $keyPath -Force }

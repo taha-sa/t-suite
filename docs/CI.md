@@ -83,8 +83,8 @@ jobs:
 
 `version` accepts `1.2.3` or `v1.2.3` (also prerelease versions such as
 `v1.2.3-beta.1`). `channel` accepts only `stable` or `beta`, defaulting to `stable`.
-Beta releases use `gh release create --prerelease`; both channels write their
-channel into `latest.json`. The template uses generated GitHub release notes
+Beta releases use `gh release create --prerelease`; both channels include their
+channel in the signed manifest (see channel publishing below). The template uses generated GitHub release notes
 when `-Notes` is omitted; supply notes locally as before if desired.
 
 The workflow writes the PEM to a unique file under `RUNNER_TEMP`, passes its
@@ -127,3 +127,33 @@ Local usage stays compatible:
 Without `-KeyPath`, the template still uses
 `$env:USERPROFILE/.t-suite/keys/<AppId>.pem`. Without `TSuiteRoot`, it retains its
 existing local SDK directory default. `-NoPublish` still overrides `-Publish`.
+
+## Blocking a bad release and channel publishing
+
+Update existing app copies of release.ps1 to the current template. Beta releases
+write latest-beta.json and upload that pointer onto the current stable release,
+since GitHub releases/latest excludes prereleases. Publish a stable baseline first.
+Stable releases write both latest.json and latest-beta.json with identical signed
+contents so beta clients also receive stable releases. Both signatures are generated.
+
+Publish a new latest.json pointing to a newer safe artifact, with `blocked_versions`
+listing the bad release and `min_version` set to the oldest supported version.
+For example, to replace bad 1.2.3 with safe 1.2.4:
+
+```powershell
+./release.ps1 1.2.4 'Emergency fix' -MinVersion 1.2.4 -BlockedVersions @('1.2.3') -Publish
+```
+
+The reusable workflow accepts optional `min_version` and comma-separated
+`blocked_versions` inputs and passes them to the template. For an existing safe
+release, regenerate the manifest using the exact artifact hash and sign command in
+PROTOCOL §8.2, then upload/replace latest.json and latest-beta.json on the current
+stable release. Preserve both signatures; editing policy fields requires resigning
+signature2. Never point the manifest at a blocked artifact. Keep the v1 signature
+compatible with the embedded key in installed clients (see §8.1 rotation).
+
+Updated clients below the minimum or running a blocked version cannot defer/skip
+the offered safe update. Installed 1.1.0 clients still verify v1 and update normally,
+but cannot enforce these new policies until upgraded. Manifest publication takes
+effect on the next network check (normally up to 24 hours); it cannot remotely stop
+an offline client or a download that has already started.
