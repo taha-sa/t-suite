@@ -5,6 +5,7 @@
     <RootNamespace>TSuite.Update</RootNamespace>
   </PropertyGroup>
   <ItemGroup>
+    <ProjectReference Include="..\TSuite.Diagnostics\TSuite.Diagnostics.csproj" />
     <ProjectReference Include="..\TSuite.Link\TSuite.Link.csproj" />
   </ItemGroup>
 </Project>
