@@ -62,7 +62,7 @@ Sunucu `Publish` asla bloklamaz (UI thread'inden cagrilabilir). Istemci basina: 
 | `download.failed` | `{id, name, error}` |
 | `ram.status` | `{usedMb, totalMb, usedPct, standbyMb}` |
 | `ram.cleaned` | `{freedMb, mode, durationMs}` |
-| `disk.low` | `{drive, freeMb, thresholdMb}` |
+| `disk.low` | `{drive, freeBytes, totalBytes, freePct}` |
 | `app.update.available` | `{version, notes}` |
 
 ## 6. Ilk komutlar / Initial commands
