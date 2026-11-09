@@ -77,6 +77,13 @@ public sealed class LinkServer : IAsyncDisposable
         }
     }
 
+    /// <summary>Bu olay adina abone en az bir istemci var mi? (Bos yere veri uretmemek icin.)</summary>
+    public bool HasSubscriber(string eventName)
+    {
+        foreach (var s in _sessions.Values) if (s.Wants(eventName)) return true;
+        return false;
+    }
+
     bool IsCoalesced(string name)
     {
         foreach (var p in CoalescedEvents)

@@ -137,6 +137,11 @@ public sealed class UpdateChecker
         Directory.CreateDirectory(tmp);
         var copy = Path.Combine(tmp, "TSuite.Updater.exe");
         File.Copy(updaterExe, copy, true);
+        // Cerceveye bagimli yardimci icin yan dosyalar (dll, runtimeconfig, deps) da kopyalanir.
+        var srcDir = Path.GetDirectoryName(updaterExe)!;
+        foreach (var f in Directory.EnumerateFiles(srcDir, "TSuite.Updater.*"))
+            if (!f.EndsWith(".exe", StringComparison.OrdinalIgnoreCase) && !f.EndsWith(".pdb", StringComparison.OrdinalIgnoreCase))
+                File.Copy(f, Path.Combine(tmp, Path.GetFileName(f)), true);
         var psi = new ProcessStartInfo(copy) { UseShellExecute = false, CreateNoWindow = true };
         psi.ArgumentList.Add("--pid"); psi.ArgumentList.Add(Environment.ProcessId.ToString());
         psi.ArgumentList.Add("--target"); psi.ArgumentList.Add(targetExe);
