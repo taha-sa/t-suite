@@ -64,6 +64,8 @@ Sunucu `Publish` asla bloklamaz (UI thread'inden cagrilabilir). Istemci basina: 
 | `ram.cleaned` | `{freedMb, mode, durationMs}` |
 | `disk.low` | `{drive, freeBytes, totalBytes, freePct}` |
 | `app.update.available` | `{version, notes}` |
+| `scan.finished` | `{root, totalBytes, durationMs}` |
+| `file.open` (t-bridge -> telefon, suite olayi) | `{name}` |
 
 ## 6. Ilk komutlar / Initial commands
 | ad | data -> result |
@@ -73,6 +75,11 @@ Sunucu `Publish` asla bloklamaz (UI thread'inden cagrilabilir). Istemci basina: 
 | `ram.clean` | `{mode?: "smart"\|"full"}` -> `{freedMb}` |
 | `app.show` | `{}` -> `{}` (pencereyi one getirir) |
 | `app.version` | `{}` -> `{version, protocol}` |
+| `disk.status` | `{drive?}` -> `{drives: [{drive, freeBytes, totalBytes, freePct}]}` |
+| `scan.start` | `{path}` -> `{started}` |
+| `file.present` | `{name}` -> `{}` |
+| `file.send` | `{path, open?}` -> `{ids}` |
+| `phone.status` | `{}` -> `{connected, name}` |
 
 Komutlar uygulamanin kendi thread'ine yonlendirilmelidir: sunucu handler'i thread-pool'da calistirir, UI'ya dokunmadan once `Invoke` kullanin.
 
