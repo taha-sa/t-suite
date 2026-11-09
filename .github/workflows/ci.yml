@@ -1,0 +1,35 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  build-test:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+      - run: dotnet restore TSuite.slnx
+      - run: dotnet build TSuite.slnx -c Release --no-restore -v q
+      - run: dotnet test TSuite.slnx -c Release --no-build -v q
+      - run: dotnet build samples/UpdaterHostSample/UpdaterHostSample.csproj -c Release -v q
+      - name: Verify updater build files
+        shell: pwsh
+        run: |
+          $dir = 'samples/UpdaterHostSample/bin/Release/net10.0-windows'
+          'TSuite.Updater.exe', 'TSuite.Updater.dll', 'TSuite.Updater.deps.json', 'TSuite.Updater.runtimeconfig.json' | ForEach-Object {
+            if (-not (Test-Path (Join-Path $dir $_))) { throw "Missing $_" }
+          }
+      - run: dotnet publish samples/UpdaterHostSample/UpdaterHostSample.csproj -c Release -r win-x64 --self-contained false -v q
+      - name: Verify updater files
+        shell: pwsh
+        run: |
+          $dir = 'samples/UpdaterHostSample/bin/Release/net10.0-windows/win-x64/publish'
+          'TSuite.Updater.exe', 'TSuite.Updater.dll', 'TSuite.Updater.deps.json', 'TSuite.Updater.runtimeconfig.json' | ForEach-Object {
+            if (-not (Test-Path (Join-Path $dir $_))) { throw "Missing $_" }
+          }

@@ -1,0 +1,38 @@
+<Project>
+  <!-- Import this file from an app instead of referencing TSuite.Updater.csproj. -->
+  <PropertyGroup>
+    <TSuiteUpdaterProject Condition="'$(TSuiteUpdaterProject)' == ''">$(MSBuildThisFileDirectory)..\src\TSuite.Updater\TSuite.Updater.csproj</TSuiteUpdaterProject>
+    <!-- The Updater always uses its own TFM; only the RID (if the app has one) is shared. -->
+    <TSuiteUpdaterRuntimeIdentifier Condition="'$(TSuiteUpdaterRuntimeIdentifier)' == ''">$(RuntimeIdentifier)</TSuiteUpdaterRuntimeIdentifier>
+    <TSuiteUpdaterWorkDir>$([System.IO.Path]::GetFullPath('$(MSBuildProjectDirectory)\$(BaseIntermediateOutputPath)TSuite.Updater\'))</TSuiteUpdaterWorkDir>
+    <TSuiteUpdaterBuildDir>$(TSuiteUpdaterWorkDir)build\</TSuiteUpdaterBuildDir>
+    <TSuiteUpdaterPublishDir>$(TSuiteUpdaterWorkDir)publish\</TSuiteUpdaterPublishDir>
+    <_TSuiteUpdaterProps>SelfContained=false;PublishSingleFile=false;RuntimeIdentifier=$(TSuiteUpdaterRuntimeIdentifier)</_TSuiteUpdaterProps>
+  </PropertyGroup>
+
+  <Target Name="BuildTSuiteUpdater" AfterTargets="Build">
+    <MSBuild Projects="$(TSuiteUpdaterProject)" Targets="Restore"
+             Properties="$(_TSuiteUpdaterProps);MSBuildRestoreSessionId=$([System.Guid]::NewGuid())" />
+    <MSBuild Projects="$(TSuiteUpdaterProject)" Targets="Build"
+             Properties="$(_TSuiteUpdaterProps);OutputPath=$(TSuiteUpdaterBuildDir)" />
+    <ItemGroup>
+      <_TSuiteUpdaterBuildFiles Include="$(TSuiteUpdaterBuildDir)**\*" />
+    </ItemGroup>
+    <Copy SourceFiles="@(_TSuiteUpdaterBuildFiles)"
+          DestinationFiles="@(_TSuiteUpdaterBuildFiles->'$(TargetDir)%(RecursiveDir)%(Filename)%(Extension)')"
+          SkipUnchangedFiles="true" />
+  </Target>
+
+  <Target Name="PublishTSuiteUpdater" AfterTargets="Publish">
+    <MSBuild Projects="$(TSuiteUpdaterProject)" Targets="Restore"
+             Properties="$(_TSuiteUpdaterProps);MSBuildRestoreSessionId=$([System.Guid]::NewGuid())" />
+    <MSBuild Projects="$(TSuiteUpdaterProject)" Targets="Publish"
+             Properties="$(_TSuiteUpdaterProps);PublishDir=$(TSuiteUpdaterPublishDir)" />
+    <ItemGroup>
+      <_TSuiteUpdaterPublishFiles Include="$(TSuiteUpdaterPublishDir)**\*" />
+    </ItemGroup>
+    <Copy SourceFiles="@(_TSuiteUpdaterPublishFiles)"
+          DestinationFiles="@(_TSuiteUpdaterPublishFiles->'$(PublishDir)%(RecursiveDir)%(Filename)%(Extension)')"
+          SkipUnchangedFiles="true" />
+  </Target>
+</Project>
