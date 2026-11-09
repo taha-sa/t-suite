@@ -1,0 +1,13 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/TSuite.Link/TSuite.Link.csproj" />
+    <Project Path="src/TSuite.Update/TSuite.Update.csproj" />
+    <Project Path="src/TSuite.Updater/TSuite.Updater.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/TSuite.Tests/TSuite.Tests.csproj" />
+  </Folder>
+  <Folder Name="/tools/">
+    <Project Path="tools/keygen/keygen.csproj" />
+  </Folder>
+</Solution>
