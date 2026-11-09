@@ -113,7 +113,7 @@ public sealed class LinkClient : IAsyncDisposable
                 Hello = null; _pipe = null;
                 try { pipe.Dispose(); } catch { }
                 foreach (var kv in _pending) kv.Value.TrySetException(new IOException("Disconnected"));
-                if (was) Disconnected?.Invoke();
+                if (was) { try { Disconnected?.Invoke(); } catch { } }
             }
             try { await Task.Delay(_retry, ct).ConfigureAwait(false); } catch { break; }
         }
@@ -137,7 +137,7 @@ public sealed class LinkClient : IAsyncDisposable
                     Hello = env.Data is { } d ? JsonSerializer.Deserialize(d, LinkJsonContext.Default.HelloData) : new HelloData();
                     _firstConnect.TrySetResult();
                     if (_prefixes.Length > 0) { try { await SendSubscribeAsync().ConfigureAwait(false); } catch { } }
-                    Connected?.Invoke(Hello!);
+                    try { Connected?.Invoke(Hello!); } catch { }
                     break;
                 case LinkProtocol.TypeReply:
                     if (env.Id != null && _pending.TryRemove(env.Id, out var tcs)) tcs.TrySetResult(env);
