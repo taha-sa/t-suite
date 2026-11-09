@@ -71,16 +71,24 @@ public sealed class LinkServer : IAsyncDisposable
         bool coalesce = IsCoalesced(name);
         foreach (var s in _sessions.Values)
         {
-            if (!s.Wants(name)) continue;
-            line ??= LinkJson.Serialize(new Envelope { Type = LinkProtocol.TypeEvent, Name = name, Id = key, Data = data, Ts = LinkJson.NowMs() });
-            s.EnqueueEvent(line, coalesce ? name + "|" + key : null);
+            // Bir istemcideki hata host uygulamaya (cagiran thread, UI dahil) asla sizmaz.
+            try
+            {
+                if (!s.Wants(name)) continue;
+                line ??= LinkJson.Serialize(new Envelope { Type = LinkProtocol.TypeEvent, Name = name, Id = key, Data = data, Ts = LinkJson.NowMs() });
+                s.EnqueueEvent(line, coalesce ? name + "|" + key : null);
+            }
+            catch { }
         }
     }
 
     /// <summary>Bu olay adina abone en az bir istemci var mi? (Bos yere veri uretmemek icin.)</summary>
     public bool HasSubscriber(string eventName)
     {
-        foreach (var s in _sessions.Values) if (s.Wants(eventName)) return true;
+        foreach (var s in _sessions.Values)
+        {
+            try { if (s.Wants(eventName)) return true; } catch { }
+        }
         return false;
     }
 
@@ -101,7 +109,7 @@ public sealed class LinkServer : IAsyncDisposable
         _cts.Dispose();
     }
 
-    sealed class Session
+    internal sealed class Session
     {
         readonly LinkServer _srv;
         readonly NamedPipeServerStream _pipe;
@@ -119,8 +127,32 @@ public sealed class LinkServer : IAsyncDisposable
 
         public bool Wants(string name)
         {
-            foreach (var p in _prefixes) if (name.StartsWith(p, StringComparison.Ordinal)) return true;
+            foreach (var p in _prefixes) if (p != null && name.StartsWith(p, StringComparison.Ordinal)) return true;
             return false;
+        }
+
+        public const int MaxPrefixes = 64, MaxPrefixLength = 256;
+
+        /// <summary>
+        /// subscribe verisini dogrular: data nesne, "prefixes" dizi olmali. Dizideki string olmayan/null/cok uzun ogeler atilir
+        /// ("" = hepsi gecerlidir), en fazla MaxPrefixes oge. Gecersiz yapi -> false (mevcut abonelik degismez).
+        /// </summary>
+        internal static bool TryParsePrefixes(JsonElement? data, out string[] prefixes)
+        {
+            prefixes = [];
+            if (data is not { ValueKind: JsonValueKind.Object } d) return false;
+            if (!d.TryGetProperty("prefixes", out var arr) || arr.ValueKind != JsonValueKind.Array) return false;
+            var list = new List<string>();
+            foreach (var e in arr.EnumerateArray())
+            {
+                if (e.ValueKind != JsonValueKind.String) continue;
+                var str = e.GetString();
+                if (str is null || str.Length > MaxPrefixLength) continue;
+                if (list.Count >= MaxPrefixes) break;
+                list.Add(str);
+            }
+            prefixes = list.ToArray();
+            return true;
         }
 
         void Signal() { try { _signal.Release(); } catch (SemaphoreFullException) { } catch (ObjectDisposedException) { } }
@@ -180,14 +212,17 @@ public sealed class LinkServer : IAsyncDisposable
                 if (line.Value.Length == 0) continue;
                 Envelope? env;
                 try { env = JsonSerializer.Deserialize(line.Value.Span, LinkJsonContext.Default.Envelope); }
-                catch (JsonException) { continue; } // bozuk satir: yoksay / ignore malformed line
+                catch (Exception) { continue; } // bozuk satir: yoksay / ignore malformed line
                 if (env == null || env.V < 1) continue;
                 switch (env.Type)
                 {
                     case LinkProtocol.TypeSubscribe:
-                        if (env.Data is { } d && d.ValueKind == JsonValueKind.Object)
+                        if (TryParsePrefixes(env.Data, out var pf)) _prefixes = pf;
+                        else
                         {
-                            try { _prefixes = JsonSerializer.Deserialize(d, LinkJsonContext.Default.SubscribeData)?.Prefixes ?? []; } catch { }
+                            // Yalniz bu istemciye hata cevabi; baglanti ve digerleri etkilenmez.
+                            var ed = LinkJson.Obj(("ok", false), ("error", "bad_subscribe"));
+                            EnqueueReply(LinkJson.Serialize(new Envelope { Type = LinkProtocol.TypeReply, Id = env.Id, Name = "subscribe", Data = ed, Ts = LinkJson.NowMs() }));
                         }
                         break;
                     case LinkProtocol.TypeCmd:
