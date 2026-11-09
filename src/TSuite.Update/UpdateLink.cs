@@ -50,7 +50,7 @@ public static class UpdateCli
             var info = await checker.CheckAsync(force: true).ConfigureAwait(false);
             if (info == null) return 0;
             var file = await checker.DownloadAsync(info).ConfigureAwait(false);
-            if (launch) UpdateChecker.LaunchUpdater(file, restart: false);
+            if (launch) UpdateChecker.LaunchUpdater(file, restart: false, sha256: info.Manifest.Sha256);
             return 0;
         }
         catch { return 1; }

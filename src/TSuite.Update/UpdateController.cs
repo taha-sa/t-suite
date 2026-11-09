@@ -112,7 +112,7 @@ public sealed class UpdateController
             var prog = new Progress<double>(p => { Progress = p; ProgressChanged?.Invoke(p); });
             var file = await _checker.DownloadAsync(info, prog, cts.Token).ConfigureAwait(false);
             Set(UpdateState.Launching);
-            UpdateChecker.LaunchUpdater(file);
+            UpdateChecker.LaunchUpdater(file, sha256: info.Manifest.Sha256);
             ExitRequested?.Invoke();
         }
         catch (OperationCanceledException)

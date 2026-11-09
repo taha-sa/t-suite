@@ -3,7 +3,8 @@ using System.IO.Compression;
 
 // TSuite.Updater: ebeveyn surecin cikmasini bekler, exe'yi (veya zip icerigini) degistirir,
 // eskiyi .bak'a yedekler, hata olursa geri alir, istenirse yeniden baslatir.
-// Args: --pid N --target <exe> --source <yeni exe veya .zip> [--restart]
+// Args: --pid N --target <exe> --source <yeni exe veya .zip> [--sha256 <hex>] [--restart]
+// --sha256: kaynak, kopyalamadan hemen once hashlenir; uyusmazlikta cikis kodu 3, hedef degismez.
 
 var logDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "T-Suite", "logs");
 Directory.CreateDirectory(logDir);
@@ -14,7 +15,7 @@ void Log(string m)
     try { File.AppendAllText(logPath, $"{DateTime.Now:yyyy-MM-dd HH:mm:ss} {m}{Environment.NewLine}"); } catch { }
 }
 
-int pid = 0; string? target = null, source = null; bool restart = false;
+int pid = 0; string? target = null, source = null, sha256 = null; bool restart = false;
 for (int i = 0; i < args.Length; i++)
 {
     switch (args[i])
@@ -22,6 +23,7 @@ for (int i = 0; i < args.Length; i++)
         case "--pid": if (i + 1 >= args.Length || !int.TryParse(args[++i], out pid)) return 2; break;
         case "--target": if (i + 1 >= args.Length) return 2; target = args[++i]; break;
         case "--source": if (i + 1 >= args.Length) return 2; source = args[++i]; break;
+        case "--sha256": if (i + 1 >= args.Length) return 2; sha256 = args[++i]; break;
         case "--restart": restart = true; break;
     }
 }
@@ -34,6 +36,15 @@ try
     {
         try { using var p = Process.GetProcessById(pid); if (!p.WaitForExit(60_000)) { Log("parent did not exit"); return 3; } }
         catch (ArgumentException) { /* zaten cikmis */ }
+    }
+
+    if (sha256 == null) Log("WARNING: no --sha256 given, source not re-verified");
+    else
+    {
+        string actual;
+        try { using var fs = File.OpenRead(source); actual = Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(fs)); }
+        catch (Exception ex) { Log("cannot hash source: " + ex.Message); return 3; }
+        if (!string.Equals(actual, sha256.Trim(), StringComparison.OrdinalIgnoreCase)) { Log($"SHA-256 mismatch (expected {sha256}, got {actual}); aborting"); return 3; }
     }
 
     var replaced = new List<(string path, string bak)>();
