@@ -54,23 +54,39 @@ public class LinkTests
     }
 
     [Fact]
-    public async Task Progress_events_coalesce_per_key()
+    public async Task Progress_events_coalesce_per_key_and_drop_intermediates()
     {
         var id = NewId();
-        var (srv, cli) = await Pair(id, "download.");
-        await using var _s = srv; await using var _c = cli;
-        await Task.Delay(200);
-        var got = new List<int>();
-        // Hizli yayin: istemci okumadan once kuyruga yigilir -> son deger kazanir.
-        for (int i = 1; i <= 2000; i++) srv.Publish("download.progress", LinkJson.Obj(("pct", i)), key: "d1");
-        for (int i = 0; i < 40; i++)
-        {
-            await Task.Delay(50);
-        }
-        cli.EventReceived += e => { lock (got) got.Add(e.Data!.Value.GetProperty("pct").GetInt32()); };
-        srv.Publish("download.progress", LinkJson.Obj(("pct", 2001)), key: "d1");
+        var srv = new LinkServer(id, "1.0.0", [], []);
+        srv.Start();
+        await using var _s = srv;
+        // Ham istemci: baglanir, abone olur, ama okumaz -> yazici kuyrugu dolar, ara degerler ezilir.
+        using var raw = new System.IO.Pipes.NamedPipeClientStream(".", LinkProtocol.PipeName(id), System.IO.Pipes.PipeDirection.InOut,
+            System.IO.Pipes.PipeOptions.Asynchronous | System.IO.Pipes.PipeOptions.CurrentUserOnly);
+        await raw.ConnectAsync(5000);
+        var sub = System.Text.Encoding.UTF8.GetBytes("{\"v\":1,\"type\":\"subscribe\",\"data\":{\"prefixes\":[\"download.\"]}}" + "\n");
+        await raw.WriteAsync(sub); await raw.FlushAsync();
         await Task.Delay(300);
-        lock (got) Assert.Contains(2001, got);
+        for (int i = 1; i <= 2000; i++) srv.Publish("download.progress", LinkJson.Obj(("pct", i)), key: "d1");
+        srv.Publish("download.progress", LinkJson.Obj(("pct", 7)), key: "d2");
+        await Task.Delay(300);
+
+        var seen = new List<(string key, int pct)>();
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        using var reader = new LineReader(raw);
+        while (!cts.IsCancellationRequested)
+        {
+            var line = await reader.ReadLineAsync(cts.Token);
+            if (line is null) break;
+            var env = System.Text.Json.JsonSerializer.Deserialize<Envelope>(line.Value.Span);
+            if (env?.Name != "download.progress") continue;
+            seen.Add((env.Id!, env.Data!.Value.GetProperty("pct").GetInt32()));
+            if (seen.Any(x => x.key == "d1" && x.pct == 2000) && seen.Any(x => x.key == "d2")) break;
+        }
+        var d1 = seen.Where(x => x.key == "d1").Select(x => x.pct).ToList();
+        Assert.Equal(2000, d1[^1]);                 // son deger ulasti
+        Assert.True(d1.Count < 50, $"intermediates not dropped: {d1.Count}");
+        Assert.Equal(1, seen.Count(x => x.key == "d2")); // farkli anahtar ayri korunur
     }
 
     [Fact]
@@ -108,9 +124,9 @@ public class RegistryTests
             Assert.Equal(3, reg.ReadAll().Count);
 
             var removed = reg.CleanupStale();
-            Assert.Equal(["gone"], removed);
+            Assert.Equal(["deadpid", "gone"], removed.OrderBy(x => x).ToArray());
             Assert.Null(reg.Read("gone"));
-            Assert.Equal(0, reg.Read("deadpid")!.Pid);
+            Assert.Null(reg.Read("deadpid"));
 
             reg.Remove("alive");
             Assert.Null(reg.Read("alive"));

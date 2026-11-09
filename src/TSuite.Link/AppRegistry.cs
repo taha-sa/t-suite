@@ -62,7 +62,7 @@ public sealed class AppRegistry
 
     /// <summary>
     /// Bayat kayitlari temizler: exePath artik yoksa (kaldirilmis uygulama) dosya silinir;
-    /// pid olu ise pid 0'a cekilir. Silinen id'leri dondurur.
+    /// pid yazili ama surec olu ise (cokme) kayit silinir. Uygulamalar temiz cikista kendi kaydini Remove() ile siler. Silinen id'leri dondurur.
     /// </summary>
     public IReadOnlyList<string> CleanupStale()
     {
@@ -78,8 +78,8 @@ public sealed class AppRegistry
             }
             else if (m.Pid != 0 && !IsAlive(m.Pid))
             {
-                m.Pid = 0;
-                try { Write(m); } catch { }
+                // Temiz cikista silinmeyen (cokmus) uygulama: bayat sayilir.
+                try { File.Delete(f); removed.Add(m.Id); } catch { }
             }
         }
         return removed;

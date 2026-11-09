@@ -3,7 +3,7 @@ using System.Buffers;
 namespace TSuite.Link;
 
 /// <summary>Akistan '\n' ile ayrilmis satirlari ArrayPool tamponuyla okur.</summary>
-internal sealed class LineReader : IDisposable
+public sealed class LineReader : IDisposable
 {
     readonly Stream _s;
     byte[] _buf = ArrayPool<byte>.Shared.Rent(8192);
