@@ -227,7 +227,7 @@ public sealed class UpdateChecker
     /// <summary>
     /// Yardimciyi (TSuite.Updater.exe) gecici klasore kopyalayip calistirir; cagiran uygulama HEMEN cikmalidir.
     /// </summary>
-    public static void LaunchUpdater(string downloadedFile, string? updaterExe = null, bool restart = true, string? sha256 = null)
+    public static void LaunchUpdater(string downloadedFile, string? updaterExe = null, bool restart = true, string? sha256 = null, IEnumerable<int>? alsoWaitPids = null)
     {
         var targetExe = Environment.ProcessPath ?? throw new InvalidOperationException("No process path");
         updaterExe ??= Path.Combine(AppContext.BaseDirectory, "TSuite.Updater.exe");
@@ -243,6 +243,7 @@ public sealed class UpdateChecker
                 File.Copy(f, Path.Combine(tmp, Path.GetFileName(f)), true);
         var psi = new ProcessStartInfo(copy) { UseShellExecute = false, CreateNoWindow = true };
         psi.ArgumentList.Add("--pid"); psi.ArgumentList.Add(Environment.ProcessId.ToString());
+        foreach (var extra in alsoWaitPids ?? []) { psi.ArgumentList.Add("--pid"); psi.ArgumentList.Add(extra.ToString()); }
         psi.ArgumentList.Add("--target"); psi.ArgumentList.Add(targetExe);
         psi.ArgumentList.Add("--source"); psi.ArgumentList.Add(downloadedFile);
         if (!string.IsNullOrEmpty(sha256)) { psi.ArgumentList.Add("--sha256"); psi.ArgumentList.Add(sha256); }

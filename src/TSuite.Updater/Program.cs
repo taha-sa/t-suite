@@ -3,7 +3,7 @@ using System.IO.Compression;
 
 // TSuite.Updater: ebeveyn surecin cikmasini bekler, exe'yi (veya zip icerigini) degistirir,
 // eskiyi .bak'a yedekler, hata olursa geri alir, istenirse yeniden baslatir.
-// Args: --pid N --target <exe> --source <yeni exe veya .zip> [--sha256 <hex>] [--restart]
+// Args: --pid N [--pid M ...] (hepsinin cikisi beklenir) --target <exe> --source <yeni exe veya .zip> [--sha256 <hex>] [--restart]
 // --sha256: kaynak, kopyalamadan hemen once hashlenir; uyusmazlikta cikis kodu 3, hedef degismez.
 
 var logDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "T-Suite", "logs");
@@ -15,12 +15,12 @@ void Log(string m)
     try { File.AppendAllText(logPath, $"{DateTime.Now:yyyy-MM-dd HH:mm:ss} {m}{Environment.NewLine}"); } catch { }
 }
 
-int pid = 0; string? target = null, source = null, sha256 = null; bool restart = false;
+var pids = new List<int>(); string? target = null, source = null, sha256 = null; bool restart = false;
 for (int i = 0; i < args.Length; i++)
 {
     switch (args[i])
     {
-        case "--pid": if (i + 1 >= args.Length || !int.TryParse(args[++i], out pid)) return 2; break;
+        case "--pid": { if (i + 1 >= args.Length || !int.TryParse(args[++i], out var one)) return 2; pids.Add(one); break; }
         case "--target": if (i + 1 >= args.Length) return 2; target = args[++i]; break;
         case "--source": if (i + 1 >= args.Length) return 2; source = args[++i]; break;
         case "--sha256": if (i + 1 >= args.Length) return 2; sha256 = args[++i]; break;
@@ -28,13 +28,13 @@ for (int i = 0; i < args.Length; i++)
     }
 }
 if (target == null || source == null) { Log("bad args"); return 2; }
-Log($"start pid={pid} target={target} source={source}");
+Log($"start pid={string.Join(",", pids)} target={target} source={source}");
 
 try
 {
-    if (pid > 0)
+    foreach (var pid in pids.Where(x => x > 0))
     {
-        try { using var p = Process.GetProcessById(pid); if (!p.WaitForExit(60_000)) { Log("parent did not exit"); return 3; } }
+        try { using var p = Process.GetProcessById(pid); if (!p.WaitForExit(60_000)) { Log($"pid {pid} did not exit"); return 3; } }
         catch (ArgumentException) { /* zaten cikmis */ }
     }
 

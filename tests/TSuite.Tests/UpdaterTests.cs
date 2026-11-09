@@ -45,4 +45,33 @@ public class UpdaterTests
         Assert.Equal(0, RunUpdater("--target", t2, "--source", s2));
         Assert.Equal("NEW", File.ReadAllText(t2));
     }
+
+    [Fact]
+    public void Waits_for_every_pid_before_replacing()
+    {
+        var (_, target, source, sha) = Make();
+        var sleeper = Process.Start(new ProcessStartInfo("powershell", "-NoProfile -Command Start-Sleep -Seconds 4") { CreateNoWindow = true, UseShellExecute = false })!;
+        var sw = Stopwatch.StartNew();
+        Assert.Equal(0, RunUpdater("--pid", "999999", "--pid", sleeper.Id.ToString(), "--target", target, "--source", source, "--sha256", sha));
+        Assert.True(sleeper.HasExited, "updater must not replace before the second pid exits");
+        Assert.Equal("NEW", File.ReadAllText(target));
+        sleeper.Dispose();
+    }
+
+    [Fact]
+    public void FindRunningInstancePids_uses_registry()
+    {
+        var dir = Path.Combine(Path.GetTempPath(), "tsuite-reg-" + Guid.NewGuid().ToString("N"));
+        var reg = new TSuite.Link.AppRegistry(dir);
+        var sleeper = Process.Start(new ProcessStartInfo("powershell", "-NoProfile -Command Start-Sleep -Seconds 5") { CreateNoWindow = true, UseShellExecute = false })!;
+        try
+        {
+            Assert.Empty(TSuite.Update.UpdateCli.FindRunningInstancePids("appx", dir));
+            reg.Write(new TSuite.Link.AppManifest { Id = "appx", Pid = sleeper.Id, ExePath = "x" });
+            Assert.Equal([sleeper.Id], TSuite.Update.UpdateCli.FindRunningInstancePids("appx", dir));
+            reg.Write(new TSuite.Link.AppManifest { Id = "appx", Pid = 0, ExePath = "x" });
+            Assert.Empty(TSuite.Update.UpdateCli.FindRunningInstancePids("appx", dir));
+        }
+        finally { sleeper.Kill(); sleeper.Dispose(); }
+    }
 }
