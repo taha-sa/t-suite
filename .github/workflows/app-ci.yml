@@ -1,0 +1,81 @@
+name: App CI (reusable)
+
+on:
+  workflow_call:
+    inputs:
+      app_project:
+        description: Project path relative to the app repository
+        required: true
+        type: string
+      test_projects:
+        description: Project glob, or newline/comma separated project paths/globs
+        type: string
+        default: 'tests/**/*.csproj'
+      dotnet_version:
+        type: string
+        default: '10.0.x'
+    secrets:
+      TSUITE_READ_TOKEN:
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  build-test-publish:
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: pwsh
+        working-directory: app
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: app
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          repository: taha-sa/t-suite
+          path: t-suite
+          token: ${{ secrets.TSUITE_READ_TOKEN }}
+          persist-credentials: false
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: ${{ inputs.dotnet_version }}
+      - name: Restore, build, test and publish
+        env:
+          APP_PROJECT: ${{ inputs.app_project }}
+          TEST_PROJECTS: ${{ inputs.test_projects }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $suiteRoot = Join-Path $env:GITHUB_WORKSPACE 't-suite'
+          $suiteProperty = "-p:TSuiteRoot=$suiteRoot"
+          function Invoke-Dotnet {
+            & dotnet @args
+            if ($LASTEXITCODE -ne 0) { throw "dotnet failed ($LASTEXITCODE)" }
+          }
+          Invoke-Dotnet restore $env:APP_PROJECT $suiteProperty -v q
+          Invoke-Dotnet build $env:APP_PROJECT -c Release --no-restore $suiteProperty -v q
+          # Match repository-relative paths with ** glob support, without another action/module.
+          $patterns = @($env:TEST_PROJECTS -split '[\r\n,]+' | ForEach-Object { $_.Trim().Replace('\', '/').TrimStart('./') } | Where-Object { $_ })
+          $projects = @(Get-ChildItem . -Recurse -File -Filter *.csproj | Where-Object { $_.FullName -notmatch '[\\/](bin|obj)[\\/]' })
+          $tests = @($projects | Where-Object {
+            $relative = $_.FullName.Substring($PWD.Path.TrimEnd('\', '/').Length + 1).Replace('\', '/')
+            foreach ($pattern in $patterns) {
+              $regex = '^' + [regex]::Escape($pattern).Replace('\*\*/', '(?:.*/)?').Replace('\*\*', '.*').Replace('\*', '[^/]*').Replace('\?', '[^/]') + '$'
+              if ($relative -match $regex) { return $true }
+            }
+            return $false
+          } | Sort-Object FullName -Unique)
+          if ($patterns.Count -gt 0 -and $tests.Count -eq 0) { throw 'test_projects matched no projects; use an empty string for apps without tests' }
+          foreach ($test in $tests) {
+            Invoke-Dotnet restore $test.FullName $suiteProperty -v q
+            Invoke-Dotnet build $test.FullName -c Release --no-restore $suiteProperty -v q
+            Invoke-Dotnet test $test.FullName -c Release --no-build --no-restore $suiteProperty -v q
+          }
+          Invoke-Dotnet publish $env:APP_PROJECT -c Release -r win-x64 --self-contained false $suiteProperty -o "$env:GITHUB_WORKSPACE/publish" -v q
+      - uses: actions/upload-artifact@v4
+        with:
+          name: app-win-x64
+          path: publish/
+          if-no-files-found: error

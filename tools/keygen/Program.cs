@@ -5,7 +5,7 @@ using TSuite.Update;
 
 // tsuite-keygen gen <app>                        -> C:\Users\hp\.t-suite\keys\<app>.pem + <app>.pub
 // tsuite-keygen pub <app>                        -> genel anahtari yazdirir
-// tsuite-keygen sign <app> <version> <sha256hex> -> imzayi (base64) yazdirir
+// tsuite-keygen sign <app> <version> <sha256hex> [key.pem] -> imzayi (base64) yazdirir
 // tsuite-keygen rotate <app> [revokeId,...]      -> <app>.next.pem/.pub uretir, rotasyon kaydini ESKI ozel anahtarla imzalar, JSON yazdirir
 // Ozel anahtar ASLA yazdirilmaz / the private key is never printed.
 
@@ -53,7 +53,7 @@ switch (cmd)
         if (args.Length < 4) return 2;
         using (var ec = ECDsa.Create())
         {
-            ec.ImportFromPem(File.ReadAllText(pem));
+            ec.ImportFromPem(File.ReadAllText(args.Length > 4 ? args[4] : pem));
             Console.WriteLine(UpdateSigning.Sign(ec, app, args[2], args[3]));
         }
         return 0;

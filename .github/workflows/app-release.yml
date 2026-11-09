@@ -1,0 +1,79 @@
+name: App release (reusable)
+
+on:
+  workflow_call:
+    inputs:
+      app_id:
+        required: true
+        type: string
+      release_repo:
+        description: owner/repository for release assets
+        required: true
+        type: string
+      version:
+        description: SemVer version, with optional leading v
+        required: true
+        type: string
+      channel:
+        type: string
+        default: stable
+    secrets:
+      UPDATE_SIGNING_KEY:
+        required: true
+      RELEASE_TOKEN:
+        required: true
+      TSUITE_READ_TOKEN:
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  release:
+    runs-on: windows-latest
+    environment: release
+    concurrency:
+      group: release-${{ inputs.app_id }}-${{ inputs.channel }}
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: app
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          repository: taha-sa/t-suite
+          path: t-suite
+          token: ${{ secrets.TSUITE_READ_TOKEN }}
+          persist-credentials: false
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+      - name: Sign and publish release
+        shell: pwsh
+        working-directory: app
+        env:
+          APP_ID: ${{ inputs.app_id }}
+          RELEASE_VERSION: ${{ inputs.version }}
+          RELEASE_CHANNEL: ${{ inputs.channel }}
+          TSUITE_RELEASE_REPO: ${{ inputs.release_repo }}
+          TSuiteRoot: ${{ github.workspace }}/t-suite
+          UPDATE_SIGNING_KEY: ${{ secrets.UPDATE_SIGNING_KEY }}
+          GH_TOKEN: ${{ secrets.RELEASE_TOKEN }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if ($env:APP_ID -notmatch '^[a-zA-Z0-9][a-zA-Z0-9._-]*$') { throw 'Invalid app_id' }
+          if ($env:TSUITE_RELEASE_REPO -notmatch '^[a-zA-Z0-9_.-]+/[a-zA-Z0-9_.-]+$') { throw 'Invalid release_repo' }
+          if ($env:RELEASE_CHANNEL -notin @('stable', 'beta')) { throw 'channel must be stable or beta' }
+          $version = $env:RELEASE_VERSION -replace '^v', ''
+          if ($version -notmatch '^\d+\.\d+\.\d+(-[0-9A-Za-z.]+)?$') { throw 'Invalid version' }
+          $keyPath = Join-Path $env:RUNNER_TEMP ("tsuite-signing-" + [guid]::NewGuid() + '.pem')
+          try {
+            [IO.File]::WriteAllText($keyPath, $env:UPDATE_SIGNING_KEY, [Text.UTF8Encoding]::new($false))
+            Remove-Item Env:UPDATE_SIGNING_KEY
+            # The app's configured template owns artifact creation, signing and gh release create.
+            & ./release.ps1 -Version $version -Publish -ApplicationId $env:APP_ID -KeyPath $keyPath -Channel $env:RELEASE_CHANNEL -ReleaseRepo $env:TSUITE_RELEASE_REPO
+            if ($LASTEXITCODE -ne 0) { throw "release.ps1 failed ($LASTEXITCODE)" }
+          } finally {
+            if (Test-Path -LiteralPath $keyPath) { Remove-Item -LiteralPath $keyPath -Force }
+          }

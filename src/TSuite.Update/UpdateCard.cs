@@ -19,14 +19,15 @@ public sealed class UpdateCard : Form
     readonly System.Windows.Forms.Timer _fade = new() { Interval = 15 };
     readonly DateTime _t0 = DateTime.UtcNow;
     int _scroll, _notesTotal;
-    string _hover = "";
     Rectangle _notesRect;
-    readonly List<(string Id, Rectangle R)> _hits = new();
+    readonly CardButton _primary, _later, _skip;
+    bool _positioning;
     bool _fadeStarted;
 
     public UpdateCard(UpdateController controller, UpdateTheme theme)
     {
         _c = controller; _t = theme;
+        AutoScaleMode = AutoScaleMode.None; // All custom geometry is scaled explicitly.
         FormBorderStyle = FormBorderStyle.None;
         StartPosition = FormStartPosition.Manual;
         ShowInTaskbar = false; TopMost = true;
@@ -36,12 +37,17 @@ public sealed class UpdateCard : Form
         SetStyle(ControlStyles.UserPaint | ControlStyles.OptimizedDoubleBuffer
                  | ControlStyles.ResizeRedraw, true);
         DoubleBuffered = true;
-        var wa = Screen.PrimaryScreen!.WorkingArea;
-        Location = new Point(wa.Right - W - 16, wa.Bottom - H - 16);
-        using (var gp = RoundRect(new Rectangle(0, 0, W, H), Radius)) Region = new Region(gp);
+        _primary = new CardButton(this, true) { TabIndex = 0 };
+        _later = new CardButton(this, false) { Text = "Sonra", AccessibleName = "Sonra", TabIndex = 1 };
+        _skip = new CardButton(this, false, true) { Text = "Bu sürümü atla", AccessibleName = "Bu sürümü atla", TabIndex = 2 };
+        Controls.AddRange([_primary, _later, _skip]);
+        _primary.Click += async (_, _) => { if (!Busy) await _c.StartUpdateAsync(); };
+        _later.Click += (_, _) => Later();
+        _skip.Click += (_, _) => { _c.Skip(); Close(); };
+        UpdateButtons();
 
         _c.StateChanged += OnState;
-        _c.ProgressChanged += _ => Redraw();
+        _c.ProgressChanged += OnProgress;
         _fade.Tick += (_, _) =>
         {
             double p = Math.Min(1, (DateTime.UtcNow - _t0).TotalMilliseconds / 150.0);
@@ -50,6 +56,70 @@ public sealed class UpdateCard : Form
     }
 
     protected override bool ShowWithoutActivation => true;
+
+    bool Busy => _c.State is UpdateState.Downloading or UpdateState.Launching;
+    int S(int value) => (int)Math.Round(value * DeviceDpi / 96.0);
+    Rectangle R(int x, int y, int width, int height) => new(S(x), S(y), S(width), S(height));
+    Point P(int x, int y) => new(S(x), S(y));
+
+    protected override void OnLoad(EventArgs e)
+    {
+        UpdateButtons();
+        PositionCard();
+        base.OnLoad(e);
+    }
+
+    protected override void OnDpiChanged(DpiChangedEventArgs e)
+    {
+        base.OnDpiChanged(e);
+        PositionCard();
+    }
+
+    void PositionCard()
+    {
+        if (_positioning) return;
+        _positioning = true;
+        try
+        {
+            var wa = (Owner == null ? Screen.PrimaryScreen! : Screen.FromControl(Owner)).WorkingArea;
+            // Move onto the destination monitor first so DeviceDpi reflects that monitor.
+            Location = new Point(wa.Right - Math.Min(S(W), wa.Width), wa.Bottom - Math.Min(S(H), wa.Height));
+            int margin = S(Pad);
+            ClientSize = new Size(Math.Min(S(W), Math.Max(1, wa.Width - 2 * margin)),
+                                  Math.Min(S(H), Math.Max(1, wa.Height - 2 * margin)));
+            Location = new Point(Math.Clamp(wa.Right - Width - margin, wa.Left, wa.Right - Width),
+                                 Math.Clamp(wa.Bottom - Height - margin, wa.Top, wa.Bottom - Height));
+            using var gp = RoundRect(ClientRectangle, Math.Min(S(Radius), Math.Min(Width, Height) / 2));
+            var oldRegion = Region;
+            Region = new Region(gp);
+            oldRegion?.Dispose();
+            _primary.Bounds = R(W - Pad - 132, H - Pad - 34, 132, 34);
+            _later.Bounds = R(W - Pad - 132 - 8 - 72, H - Pad - 34, 72, 34);
+            _skip.Bounds = R(Pad, H - Pad - 34, 110, 34);
+            Invalidate(true);
+        }
+        finally { _positioning = false; }
+    }
+
+    void Later() { _c.Later(); Close(); }
+
+    protected override bool ProcessCmdKey(ref Message msg, Keys keyData)
+    {
+        if (keyData == Keys.Escape) { Later(); return true; }
+        if (keyData == Keys.Enter) { if (!Busy) _primary.PerformClick(); return true; }
+        return base.ProcessCmdKey(ref msg, keyData);
+    }
+
+    void UpdateButtons()
+    {
+        _primary.Enabled = !Busy;
+        _primary.Text = Busy ? "Bekleyin…" : _c.State == UpdateState.Failed ? "Tekrar dene" : "Şimdi güncelle";
+        _primary.AccessibleName = _primary.Text;
+        _later.Visible = _skip.Visible = !Busy;
+        Invalidate(true);
+    }
+
+    void OnProgress(double _) => Redraw();
 
     protected override void OnShown(EventArgs e)
     {
@@ -66,7 +136,7 @@ public sealed class UpdateCard : Form
         BeginInvoke(() =>
         {
             if (_c.State is UpdateState.Idle && _c.Info == null) Close();
-            else { _scroll = 0; Invalidate(); }
+            else { _scroll = 0; UpdateButtons(); }
         });
     }
 
@@ -84,19 +154,18 @@ public sealed class UpdateCard : Form
         g.SmoothingMode = SmoothingMode.AntiAlias;
         g.TextRenderingHint = TextRenderingHint.ClearTypeGridFit;
         g.Clear(_t.Bg);
-        using (var gp = RoundRect(new Rectangle(0, 0, W - 1, H - 1), Radius))
+        using (var gp = RoundRect(new Rectangle(0, 0, ClientSize.Width - 1, ClientSize.Height - 1), S(Radius)))
         using (var pen = new Pen(_t.Border, 1)) g.DrawPath(pen, gp);
 
         var info = _c.Info; var st = _c.State;
-        _hits.Clear();
-        TextRenderer.DrawText(g, "Güncelleme var", _title, new Point(Pad, Pad), _t.Text, TextFormatFlags.NoPadding);
+        TextRenderer.DrawText(g, "Güncelleme var", _title, P(Pad, Pad), _t.Text, TextFormatFlags.NoPadding);
         string sub = info == null ? "" : $"v{info.CurrentVersion.TrimStart('v')}  →  v{info.NewVersion.TrimStart('v')}";
-        TextRenderer.DrawText(g, sub, _small, new Point(Pad, Pad + 28), _t.TextDim, TextFormatFlags.NoPadding);
+        TextRenderer.DrawText(g, sub, _small, P(Pad, Pad + 28), _t.TextDim, TextFormatFlags.NoPadding);
 
         // notlar / notes
-        _notesRect = new Rectangle(Pad, 68, W - 2 * Pad, 104);
-        using (var gp = RoundRect(_notesRect, 8)) using (var b = new SolidBrush(_t.Surface)) g.FillPath(b, gp);
-        var inner = Rectangle.Inflate(_notesRect, -10, -8);
+        _notesRect = R(Pad, 68, W - 2 * Pad, 104);
+        using (var gp = RoundRect(_notesRect, S(8))) using (var b = new SolidBrush(_t.Surface)) g.FillPath(b, gp);
+        var inner = Rectangle.Inflate(_notesRect, -S(10), -S(8));
         string notes = st == UpdateState.Failed ? "Hata: " + _c.Error : (info?.Notes ?? "");
         var flags = TextFormatFlags.WordBreak | TextFormatFlags.NoPadding | TextFormatFlags.Left | TextFormatFlags.Top;
         var sz = TextRenderer.MeasureText(g, notes, _body, new Size(inner.Width, int.MaxValue), flags);
@@ -109,93 +178,69 @@ public sealed class UpdateCard : Form
         if (_notesTotal > inner.Height) // kaydirma cubugu
         {
             float ratio = (float)inner.Height / _notesTotal;
-            int bh = Math.Max(16, (int)(inner.Height * ratio));
+            int bh = Math.Max(S(16), (int)(inner.Height * ratio));
             int by = inner.Y + (int)((inner.Height - bh) * ((float)_scroll / (_notesTotal - inner.Height)));
             using var b = new SolidBrush(_t.Border);
-            g.FillRectangle(b, _notesRect.Right - 6, by, 3, bh);
+            g.FillRectangle(b, _notesRect.Right - S(6), by, S(3), bh);
         }
 
         // ilerleme / progress
-        var pr = new Rectangle(Pad, 184, W - 2 * Pad, 6);
+        var pr = R(Pad, 184, W - 2 * Pad, 6);
         if (st is UpdateState.Downloading or UpdateState.Launching)
         {
-            using (var gp = RoundRect(pr, 3)) using (var b = new SolidBrush(_t.Border)) g.FillPath(b, gp);
+            using (var gp = RoundRect(pr, S(3))) using (var b = new SolidBrush(_t.Border)) g.FillPath(b, gp);
             int fw = (int)(pr.Width * (st == UpdateState.Launching ? 1 : _c.Progress));
-            if (fw > 6) using (var gp = RoundRect(new Rectangle(pr.X, pr.Y, fw, pr.Height), 3)) using (var b = new SolidBrush(_t.Accent)) g.FillPath(b, gp);
+            if (fw > S(6)) using (var gp = RoundRect(new Rectangle(pr.X, pr.Y, fw, pr.Height), S(3))) using (var b = new SolidBrush(_t.Accent)) g.FillPath(b, gp);
             string pt = st == UpdateState.Launching ? "Yükleniyor…" : $"İndiriliyor… %{(int)(_c.Progress * 100)}";
-            TextRenderer.DrawText(g, pt, _small, new Point(Pad, 194), _t.TextDim, TextFormatFlags.NoPadding);
+            TextRenderer.DrawText(g, pt, _small, P(Pad, 194), _t.TextDim, TextFormatFlags.NoPadding);
         }
 
-        // butonlar / buttons
-        int by2 = H - Pad - 34;
-        bool busy = st is UpdateState.Downloading or UpdateState.Launching;
-        string primary = st == UpdateState.Failed ? "Tekrar dene" : "Şimdi güncelle";
-        var pRect = new Rectangle(W - Pad - 132, by2, 132, 34);
-        var lRect = new Rectangle(pRect.X - 8 - 72, by2, 72, 34);
-        var sRect = new Rectangle(Pad, by2, 110, 34);
-        if (!busy)
-        {
-            DrawButton(g, pRect, primary, "primary", true);
-            DrawButton(g, lRect, "Sonra", "later", false);
-            DrawButton(g, sRect, "Bu sürümü atla", "skip", false, dim: true);
-        }
-        else DrawButton(g, pRect, "Bekleyin…", "busy", true, disabled: true);
     }
 
-    void DrawButton(Graphics g, Rectangle r, string text, string id, bool filled, bool dim = false, bool disabled = false)
+    sealed class CardButton(UpdateCard card, bool filled, bool dim = false) : Button
     {
-        bool hov = _hover == id && !disabled;
-        if (!disabled) _hits.Add((id, r));
-        using (var gp = RoundRect(r, 8))
+        bool _hover;
+        protected override void OnMouseEnter(EventArgs e) { _hover = true; Invalidate(); base.OnMouseEnter(e); }
+        protected override void OnMouseLeave(EventArgs e) { _hover = false; Invalidate(); base.OnMouseLeave(e); }
+        protected override void OnGotFocus(EventArgs e) { Invalidate(); base.OnGotFocus(e); }
+        protected override void OnLostFocus(EventArgs e) { Invalidate(); base.OnLostFocus(e); }
+        protected override void OnPaint(PaintEventArgs e)
         {
-            if (filled)
+            var g = e.Graphics;
+            g.SmoothingMode = SmoothingMode.AntiAlias;
+            g.Clear(card._t.Bg);
+            var r = Rectangle.Inflate(ClientRectangle, -card.S(3), -card.S(3));
+            using var gp = RoundRect(r, card.S(6));
+            if (filled || _hover)
             {
-                var col = disabled ? Color.FromArgb(120, _t.Accent) : hov ? _t.AccentHover : _t.Accent;
-                using var b = new SolidBrush(col); g.FillPath(b, gp);
+                var color = filled ? (!Enabled ? Color.FromArgb(120, card._t.Accent) : _hover ? card._t.AccentHover : card._t.Accent) : card._t.Surface;
+                using var brush = new SolidBrush(color);
+                g.FillPath(brush, gp);
             }
-            else if (hov) { using var b = new SolidBrush(_t.Surface); g.FillPath(b, gp); }
-            if (!filled && !dim) { using var pen = new Pen(_t.Border, 1); g.DrawPath(pen, gp); }
+            if (!filled && !dim)
+            {
+                using var border = new Pen(card._t.Border, card.S(1));
+                g.DrawPath(border, gp);
+            }
+            if (Focused)
+            {
+                using var ring = RoundRect(Rectangle.Inflate(ClientRectangle, -card.S(1), -card.S(1)), card.S(8));
+                using var pen = new Pen(card._t.Accent, card.S(2));
+                g.DrawPath(pen, ring);
+            }
+            TextRenderer.DrawText(g, Text, card._small, r, filled ? card._t.OnAccent : dim ? card._t.TextDim : card._t.Text,
+                TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
         }
-        var fc = filled ? _t.OnAccent : dim ? _t.TextDim : _t.Text;
-        TextRenderer.DrawText(g, text, _small, r, fc,
-            TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
     }
-
-    string HitTest(Point p)
-    {
-        foreach (var (id, r) in _hits) if (r.Contains(p)) return id;
-        return "";
-    }
-
-    protected override void OnMouseMove(MouseEventArgs e)
-    {
-        var h = HitTest(e.Location);
-        if (h != _hover) { _hover = h; Cursor = h == "" ? Cursors.Default : Cursors.Hand; Invalidate(); }
-        base.OnMouseMove(e);
-    }
-
-    protected override void OnMouseLeave(EventArgs e) { _hover = ""; Invalidate(); base.OnMouseLeave(e); }
-
     protected override void OnMouseWheel(MouseEventArgs e)
     {
-        if (_notesRect.Contains(e.Location)) { _scroll -= Math.Sign(e.Delta) * 24; Invalidate(); }
+        if (_notesRect.Contains(e.Location)) { _scroll -= Math.Sign(e.Delta) * S(24); Invalidate(); }
         base.OnMouseWheel(e);
-    }
-
-    protected override async void OnMouseClick(MouseEventArgs e)
-    {
-        base.OnMouseClick(e);
-        switch (HitTest(e.Location))
-        {
-            case "primary": await _c.StartUpdateAsync(); break;
-            case "later": _c.Later(); Close(); break;
-            case "skip": _c.Skip(); Close(); break;
-        }
     }
 
     protected override void Dispose(bool disposing)
     {
-        if (disposing) { _fade.Dispose(); _title.Dispose(); _body.Dispose(); _small.Dispose(); }
+        if (disposing) { _c.StateChanged -= OnState; _c.ProgressChanged -= OnProgress; _fade.Dispose(); _title.Dispose(); _body.Dispose(); _small.Dispose(); }
         base.Dispose(disposing);
     }
 }
