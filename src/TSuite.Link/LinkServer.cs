@@ -213,7 +213,7 @@ public sealed class LinkServer : IAsyncDisposable
                 Envelope? env;
                 try { env = JsonSerializer.Deserialize(line.Value.Span, LinkJsonContext.Default.Envelope); }
                 catch (Exception) { continue; } // bozuk satir: yoksay / ignore malformed line
-                if (env == null || env.V < 1) continue;
+                if (env == null || env.V < 1 || env.V > LinkProtocol.Version) continue;
                 switch (env.Type)
                 {
                     case LinkProtocol.TypeSubscribe:
