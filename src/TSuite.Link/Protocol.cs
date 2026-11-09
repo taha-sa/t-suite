@@ -93,7 +93,8 @@ public static class LinkJson
             }
             w.WriteEndObject();
         }
-        return JsonDocument.Parse(ms.ToArray()).RootElement.Clone();
+        using var doc = JsonDocument.Parse(ms.ToArray());
+        return doc.RootElement.Clone();
     }
 
     public static JsonElement Parse(string json)
