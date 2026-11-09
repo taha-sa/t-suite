@@ -135,3 +135,50 @@ public class RegistryTests
         finally { try { Directory.Delete(dir, true); } catch { } }
     }
 }
+
+public class RustInteropTests
+{
+    /// Rust T-Link sunucusu (kopru/tlink examples/echo_server.exe) ile C# istemcisi. TLINK_RS_ECHO ayarlı değilse atlanır.
+    [Fact]
+    public async Task CSharp_client_talks_to_rust_server()
+    {
+        var exe = Environment.GetEnvironmentVariable("TLINK_RS_ECHO");
+        if (string.IsNullOrEmpty(exe) || !File.Exists(exe)) return;
+        var id = "rsint" + Guid.NewGuid().ToString("N")[..8];
+        var psi = new System.Diagnostics.ProcessStartInfo(exe, id) { RedirectStandardOutput = true, UseShellExecute = false, CreateNoWindow = true };
+        using var p = System.Diagnostics.Process.Start(psi)!;
+        try
+        {
+            Assert.Equal("READY", await p.StandardOutput.ReadLineAsync());
+            await using var cli = new LinkClient(id, TimeSpan.FromMilliseconds(100));
+            var ticks = new List<int>();
+            cli.EventReceived += e => { if (e.Name == "tick.n") lock (ticks) ticks.Add(e.Data!.Value.GetProperty("n").GetInt32()); };
+            cli.Start("tick.");
+            Assert.True(await cli.WaitConnectedAsync(TimeSpan.FromSeconds(5)));
+            Assert.Equal(id, cli.Hello!.AppId);
+            var r = await cli.SendCommandAsync("echo", LinkJson.Obj(("merhaba", "dünya")), TimeSpan.FromSeconds(5));
+            Assert.True(r.Data!.Value.GetProperty("ok").GetBoolean());
+            Assert.Equal("dünya", r.Data.Value.GetProperty("result").GetProperty("echo").GetProperty("merhaba").GetString());
+            var bad = await cli.SendCommandAsync("yok");
+            Assert.Equal("unknown_command", bad.Data!.Value.GetProperty("error").GetString());
+            for (int i = 0; i < 40 && ticks.Count == 0; i++) await Task.Delay(100);
+            lock (ticks) Assert.NotEmpty(ticks);
+        }
+        finally { try { p.Kill(true); } catch { } }
+    }
+
+    [Fact]
+    public void Golden_lines_parse_with_csharp_envelope()
+    {
+        var path = Path.Combine(AppContext.BaseDirectory, "golden.jsonl");
+        var lines = File.ReadAllLines(path).Where(l => l.Trim().Length > 0).ToList();
+        Assert.True(lines.Count >= 6);
+        foreach (var l in lines)
+        {
+            var e = System.Text.Json.JsonSerializer.Deserialize<Envelope>(l);
+            Assert.NotNull(e);
+            Assert.Equal(1, e!.V);
+            Assert.False(string.IsNullOrEmpty(e.Type));
+        }
+    }
+}

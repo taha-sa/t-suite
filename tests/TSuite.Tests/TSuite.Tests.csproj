@@ -16,4 +16,7 @@
     <ProjectReference Include="..\..\src\TSuite.Link\TSuite.Link.csproj" />
     <ProjectReference Include="..\..\src\TSuite.Update\TSuite.Update.csproj" />
   </ItemGroup>
+  <ItemGroup>
+    <None Include="golden.jsonl" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
 </Project>

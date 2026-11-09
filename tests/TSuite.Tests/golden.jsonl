@@ -1,0 +1,7 @@
+{"v":1,"type":"hello","name":"hello","data":{"appId":"t-downloader","version":"1.1.0","protocol":1,"events":["download.progress"],"commands":["download.add"]},"ts":1731140000000}
+{"v":1,"type":"subscribe","data":{"prefixes":["download.","disk."]},"ts":1731140000100}
+{"v":1,"type":"event","id":"d1","name":"download.progress","data":{"id":"d1","name":"a.zip","bytes":1048576,"total":9437184,"speed":524288.5,"pct":11.1,"state":"downloading"},"ts":1731140000200}
+{"v":1,"type":"cmd","id":"1","name":"download.add","data":{"url":"https://example.com/ç ü.zip","referrer":"https://example.com/"},"ts":1731140000300}
+{"v":1,"type":"reply","id":"1","name":"download.add","data":{"ok":true,"result":{"id":"abc"}},"ts":1731140000400}
+{"v":1,"type":"reply","id":"2","name":"nope","data":{"ok":false,"error":"unknown_command"},"ts":1731140000500}
+{"v":1,"type":"event","name":"future.thing","data":{"yeni":[1,2,3],"alan":null},"ts":1731140000600,"extra":"gelecek alan yok sayilir"}
