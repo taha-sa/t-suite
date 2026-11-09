@@ -8,6 +8,7 @@ using System.IO.Compression;
 var logDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "T-Suite", "logs");
 Directory.CreateDirectory(logDir);
 var logPath = Path.Combine(logDir, "updater.log");
+try { if (File.Exists(logPath) && new FileInfo(logPath).Length > 256 * 1024) File.Delete(logPath); } catch { }
 void Log(string m)
 {
     try { File.AppendAllText(logPath, $"{DateTime.Now:yyyy-MM-dd HH:mm:ss} {m}{Environment.NewLine}"); } catch { }
@@ -78,6 +79,7 @@ try
     }
 
     Log("replaced " + replaced.Count + " file(s)");
+    foreach (var (path, _) in replaced) { try { File.Delete(path + ".bak"); } catch { } }
     try { File.Delete(source); } catch { }
     if (restart) TryStart(target);
     return 0;
