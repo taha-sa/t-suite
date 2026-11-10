@@ -11,3 +11,5 @@ TestResults/
 *.pfx
 *.p12
 .env
+installer/out/
+installer/staging/
