@@ -37,7 +37,7 @@ for n, (idir, acc) in APPS.items():
 # Viewer QR (Telefon icin sayfasi)
 try:
     import qrcode, sys
-    url = sys.argv[1] if len(sys.argv) > 1 else "https://github.com/taha-sa/t-desk-viewer-releases/releases/latest"
+    url = sys.argv[1] if len(sys.argv) > 1 else "https://github.com/taha-sa/tdesk-viewer-releases/releases/latest"
     q = qrcode.QRCode(border=2, box_size=6); q.add_data(url); q.make()
     q.make_image(fill_color="black", back_color="white").convert("RGB").save(os.path.join(OUT, "viewer-qr.bmp"))
 except ImportError:

@@ -38,6 +38,6 @@
   #define AppVersion "1.1.0"
 #endif
 #ifndef ViewerUrl
-  #define ViewerUrl "https://github.com/taha-sa/t-desk-viewer-releases/releases/latest"
+  #define ViewerUrl "https://github.com/taha-sa/tdesk-viewer-releases/releases/latest"
 #endif
 #endif
