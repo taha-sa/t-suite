@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="utf-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="100%" height="100%">
+  <defs>
+    <linearGradient id="ts-base" x1="15%" y1="10%" x2="85%" y2="90%">
+      <stop offset="0%" stop-color="#E3A92B" />
+      <stop offset="100%" stop-color="#9E6B05" />
+    </linearGradient>
+    <linearGradient id="ts-gold" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#EDB743" />
+      <stop offset="100%" stop-color="#E3A92B" />
+    </linearGradient>
+  </defs>
+  <!-- Flagship accent family tile -->
+  <rect width="1024" height="1024" rx="225.28" ry="225.28" fill="url(#ts-base)" data-role="tile" />
+  
+  <!-- Shared white T notch -->
+  <path d="M 112 112 H 176 M 144 112 V 168" stroke="#FFFFFF" stroke-width="20" stroke-linecap="round" data-role="notch" stroke-opacity="0.35" />
+  <!-- Master 'T' Architectural Construction -->
+  <!-- Top Crossbar Bridging Platform Modules -->
+  <line x1="240" y1="340" x2="784" y2="340" stroke="#FFFFFF" stroke-width="64" stroke-linecap="round" />
+  <!-- Central Pillar with Speed Gap -->
+  <line x1="512" y1="340" x2="512" y2="700" stroke="#FFFFFF" stroke-width="64" stroke-linecap="round" />
+  <!-- Ecosystem Cross-Platform Node Terminals -->
+  <circle cx="512" cy="784" r="32" fill="#FFFFFF" data-role="detail" />
+  <circle cx="340" cy="460" r="16" fill="#FFFFFF" data-role="detail" />
+  <circle cx="684" cy="460" r="16" fill="#FFFFFF" data-role="detail" />
+</svg>

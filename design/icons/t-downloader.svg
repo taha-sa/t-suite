@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="100%" height="100%">
+  <defs>
+    <linearGradient id="td-grad" x1="15%" y1="10%" x2="85%" y2="90%">
+      <stop offset="0%" stop-color="#38BDF8" />
+      <stop offset="100%" stop-color="#0369A1" />
+    </linearGradient>
+  </defs>
+  <!-- Background Tile -->
+  <rect width="1024" height="1024" rx="225.28" ry="225.28" fill="url(#td-grad)" data-role="tile" />
+  <!-- T-Suite Monogram Notch -->
+  <path d="M 112 112 H 176 M 144 112 V 168" stroke="#FFFFFF" stroke-opacity="0.35" stroke-width="20" stroke-linecap="round" data-role="notch" />
+  <!-- Ingestion Tray -->
+  <path d="M 240 560 V 736 C 240 762 258 784 284 784 H 740 C 766 784 784 762 784 736 V 560" stroke="#FFFFFF" stroke-width="64" stroke-linecap="round" stroke-linejoin="round" fill="none" />
+  <!-- High-Speed Downward Arrow -->
+  <line x1="512" y1="240" x2="512" y2="600" stroke="#FFFFFF" stroke-width="64" stroke-linecap="round" />
+  <path d="M 372 460 L 512 600 L 652 460" stroke="#FFFFFF" stroke-width="64" stroke-linecap="round" stroke-linejoin="round" fill="none" />
+</svg>
