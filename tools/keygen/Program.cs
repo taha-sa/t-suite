@@ -18,6 +18,20 @@ var pem = Path.Combine(keyDir, app + ".pem"); var pub = Path.Combine(keyDir, app
 
 switch (cmd)
 {
+    case "verify":
+    {
+        // verify <app> <public-key.pub> <manifest.json> <artifact.zip>
+        // Reads only the public key and produced artifacts, never a private key.
+        if (args.Length != 5) return 2;
+        var publicKey = File.ReadAllText(args[2]).Trim();
+        var manifest = System.Text.Json.JsonSerializer.Deserialize<LatestManifest>(File.ReadAllText(args[3]))
+            ?? throw new InvalidDataException("Invalid manifest");
+        bool valid = UpdateSigning.Sha256Hex(args[4]).Equals(manifest.Sha256, StringComparison.OrdinalIgnoreCase)
+            && UpdateSigning.VerifySignature(publicKey, app, manifest.Version, manifest.Sha256, manifest.Signature)
+            && UpdateSigning.VerifySignatureV2(publicKey, app, manifest);
+        Console.WriteLine(valid ? $"Verified {app} {manifest.Version}: SHA-256, V1 and V2 signatures" : $"Verification failed: {app}");
+        return valid ? 0 : 1;
+    }
     case "gen":
         if (File.Exists(pem)) { Console.Error.WriteLine("exists, not overwriting: " + pem); Console.WriteLine(File.ReadAllText(pub).Trim()); return 1; }
         Directory.CreateDirectory(keyDir);
